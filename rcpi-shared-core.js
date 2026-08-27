@@ -1253,7 +1253,7 @@
       .rcpi-shell-right .rcpi-shell-resize { left: -3px; }
       .rcpi-shell-resize:hover { background: rgba(0,45,114,.25); }
       .rcpi-shell-minbar {
-        position: fixed; top: 0; bottom: 0; width: 26px; z-index: 2000000;
+        position: fixed; top: 0; bottom: 0; width: 52px; z-index: 2000000;
         background: #002d72; color: #fff; cursor: pointer;
         display: flex; align-items: center; justify-content: center;
         box-shadow: 2px 0 12px rgba(0,0,0,.2);

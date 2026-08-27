@@ -1,10 +1,11 @@
 // ==UserScript==
 // @name         Block Builder Edit Toolkit
 // @namespace    rcpi-block-builder
-// @description  Alt+right-click toolkit for the RCPI block builder: tables, wrap+columns, convert, item-ops, row colour/insert/align, icon swap, image figure/decorative/transcript/search, fix/repair, outline, find & replace, citation linking, strip formatting, Alt-hint overlay, leader-key shortcuts. Left dock. Alt-text copilot link.
+// @description  Alt+right-click toolkit for the RCPI block builder: tables, wrap+columns, convert, item-ops, row colour/insert/align, icon swap, image figure/decorative/transcript/search, fix/repair, outline, find & replace, citation linking, strip formatting, Alt-hint overlay, leader-key shortcuts, new-page filename slugify, backend filename display, Manage Files launcher + popup locator. Left dock. Alt-text copilot link.
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
-// @version      4.1
+// @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
+// @version      4.2
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -22,7 +23,31 @@
   // toolkit is the only one of the two allowed to WRITE — every write below
   // still goes through tinyWrite; S is only ever used for detection/lookup.
   const S = (typeof unsafeWindow !== 'undefined' && unsafeWindow.RCPIShared) ? unsafeWindow.RCPIShared : window.RCPIShared;
-  if (!S) console.error('[BB] RCPIShared not loaded — check @require. New Outline/Replace/Citations panels will be unavailable.');
+  if (!S) console.error('[Edit Toolkit] RCPIShared not loaded — check @require. New Outline/Replace/Citations panels will be unavailable.');
+
+  // ─── MANAGE FILES POPUP — early exit ───────────────────────────────────
+  // Folded in from the standalone "D2L Manage Files Locator" script (see
+  // runManageFilesLocator() near the bottom of this file) so everything
+  // ships as one script instead of three. The Manage Files popup is a
+  // completely different D2L tool with no TinyMCE/editor present, so none
+  // of the block-builder code below applies there — this branch runs the
+  // locator alone and returns before touching anything else.
+  if (/\/d2l\/lp\/manageFiles\//i.test(location.pathname)) {
+    runManageFilesLocator();
+    return;
+  }
+
+  // These two are independent of TinyMCE/the block builder (they operate on
+  // D2L's own title field and Save button, and on a background fetch
+  // intercept), so they run immediately rather than waiting behind
+  // waitForTinyMCE(init) below — on a brand-new page in particular, we want
+  // the fetch intercept installed well before anyone can click Save.
+  // Folded in from "New Page Unique Names" and "Edit Page Filename & Manage
+  // Files" respectively; each is fully self-contained (own local helpers,
+  // no shared state with the block-builder code) and no-ops when it
+  // doesn't apply — see isNewPage() / isNewPageContext() inside each.
+  initNewPageUniqueNames();
+  initFilenameDisplayAndManageFiles();
 
   // ─── CONFIG ────────────────────────────────────────────────────────────────
   const BB_ORIGIN = '*'; // tighten to your block builder origin if known
@@ -5308,7 +5333,7 @@ function addParagraphToRow(rowEl) {
       #bb-tk-minbar {
         position: fixed;
         top: 0; left: 0; bottom: 0;
-        width: 26px;
+        width: 52px;
         background: #002d72;
         color: #fff;
         z-index: 1900000;
@@ -5997,6 +6022,1090 @@ function addParagraphToRow(rowEl) {
     banner.innerHTML = `⚠️ Audit found ${total} issue(s) ~${ageMin < 1 ? '<1' : ageMin} min ago — <a href="#" id="bb-audit-banner-fix" style="color:#664d03;text-decoration:underline;">Check &amp; fix</a>`;
     const link = document.getElementById('bb-audit-banner-fix');
     if (link) link.addEventListener('click', (e) => { e.preventDefault(); runFixPage(); });
+  }
+
+  // ─── FOLDED IN: NEW PAGE UNIQUE NAMES ──────────────────────────────────
+  // Originally the standalone "New Page Unique Names" userscript. On a
+  // brand-new (unsaved) page, slugifies the filename with a date+uid on
+  // first save (intercepting the PATCH to content.api.brightspace.com),
+  // then restores the visible title the author typed, fighting D2L's own
+  // re-reads for a couple of seconds. Ported verbatim aside from removing
+  // its own IIFE wrapper — every helper here is local to this function, so
+  // nothing here can collide with the block-builder code elsewhere in this
+  // file even though some names (uid, escapeHtml, etc.) are reused.
+  function initNewPageUniqueNames() {
+    // ---- config -------------------------------------------------------
+    const DATE_POSITION = 'after';   // 'after' → my-page-20260612-a3x9
+                                      // 'before' → 20260612-a3x9-my-page
+    const SEPARATOR     = '-';
+    const SLUGIFY       = true;
+    const UID_LENGTH    = 4;         // appended after date, e.g. -k7m2
+    // -------------------------------------------------------------------
+
+    function isNewPage() {
+      const editor = document.querySelector('d2l-activity-content-editor');
+      if (editor) return editor.hasAttribute('isnew');
+      return /\/topic\/-1(\?|$)/.test(window.location.href);
+    }
+
+    if (!isNewPage()) return;
+
+    let transformDone = false;
+    let originalTitle = null;
+    let pendingAction = null;
+    let restoreActive = false;
+
+    // ---- helpers ------------------------------------------------------
+
+    function today() {
+      const d = new Date();
+      const p = n => String(n).padStart(2, '0');
+      return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}`;
+    }
+
+    function uid() {
+      const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+      let result = '';
+      const arr = new Uint8Array(UID_LENGTH);
+      crypto.getRandomValues(arr);
+      for (const byte of arr) result += chars[byte % chars.length];
+      return result;
+    }
+
+    function slugify(s) {
+      s = s.trim();
+      if (SLUGIFY) {
+        s = s.toLowerCase()
+          .replace(/[^a-z0-9]+/g, SEPARATOR)
+          .replace(new RegExp(`\\${SEPARATOR}{2,}`, 'g'), SEPARATOR)
+          .replace(new RegExp(`^\\${SEPARATOR}|\\${SEPARATOR}$`, 'g'), '');
+      }
+      return s;
+    }
+
+    function alreadyDated(s) {
+      // matches slug-YYYYMMDD or slug-YYYYMMDD-uid at end
+      return DATE_POSITION === 'after'
+        ? /\d{8}(-[a-z0-9]+)?$/.test(s)
+        : /^\d{8}(-[a-z0-9]+)?/.test(s);
+    }
+
+    function buildSlug(title) {
+      if (!title || alreadyDated(title)) return null;
+      const base = slugify(title);
+      if (!base) return null;
+      const stamp = `${today()}${SEPARATOR}${uid()}`;
+      return DATE_POSITION === 'before'
+        ? `${stamp}${SEPARATOR}${base}`
+        : `${base}${SEPARATOR}${stamp}`;
+    }
+
+    // ---- DOM helpers --------------------------------------------------
+
+    function deepQuerySelector(root, selector) {
+      const found = root.querySelector(selector);
+      if (found) return found;
+      for (const el of root.querySelectorAll('*')) {
+        if (el.shadowRoot) {
+          const r = deepQuerySelector(el.shadowRoot, selector);
+          if (r) return r;
+        }
+      }
+      return null;
+    }
+
+    function getTitleField() {
+      const host = deepQuerySelector(document, 'd2l-input-text#content-title');
+      if (!host) return null;
+      const labelAttr = (host.getAttribute('label') || '').toLowerCase();
+      if (!labelAttr.startsWith('page title')) return null;
+      const input = host.shadowRoot?.querySelector('input');
+      if (!input) return null;
+      return { host, input };
+    }
+
+    function forceValue(host, input, val) {
+      const nativeSet = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      nativeSet.call(input, val);
+      input.dispatchEvent(new Event('input',  { bubbles: true, composed: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+      const vp = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(host), 'value');
+      if (vp?.set) vp.set.call(host, val);
+      else host.value = val;
+    }
+
+    function findButton(labelText) {
+      const buttonsHost = deepQuerySelector(document, 'd2l-activity-editor-buttons');
+      if (!buttonsHost) return null;
+      const buttons = buttonsHost.shadowRoot?.querySelectorAll('d2l-button');
+      if (!buttons) return null;
+      for (const btn of buttons) {
+        if (btn.textContent?.trim().toLowerCase() === labelText.toLowerCase()) return btn;
+      }
+      return null;
+    }
+
+    // ---- visible flash on the input ----------------------------------
+    // Pulses the field border+background so the restore is obvious.
+    // Green = working correctly. If you ever see it stay orange/red
+    // after the flash, something went wrong.
+
+    function flashField(input, success = true) {
+      const colour = success ? '#d4edda' : '#ffeeba'; // green-ish or amber
+      const border  = success ? '#28a745' : '#ffc107';
+      const original = {
+        bg:     input.style.backgroundColor,
+        border: input.style.borderColor,
+        trans:  input.style.transition,
+      };
+      input.style.transition       = 'background-color 0.15s, border-color 0.15s';
+      input.style.backgroundColor  = colour;
+      input.style.borderColor      = border;
+
+      setTimeout(() => {
+        input.style.transition       = 'background-color 0.6s, border-color 0.6s';
+        input.style.backgroundColor  = original.bg;
+        input.style.borderColor      = original.border;
+        setTimeout(() => {
+          input.style.transition = original.trans;
+        }, 650);
+      }, 600);
+    }
+
+    // ---- restore: fight D2L re-reads for up to 2.5s -----------------
+
+    function startRestore() {
+      if (!originalTitle) { completeAction(); return; }
+      restoreActive = true;
+
+      const tf = getTitleField();
+      if (!tf) { restoreActive = false; completeAction(); return; }
+
+      const { host, input } = tf;
+
+      forceValue(host, input, originalTitle);
+      flashField(input, true);
+
+      const pollInterval = setInterval(() => {
+        if (!restoreActive) { clearInterval(pollInterval); return; }
+        if (input.value !== originalTitle) {
+          forceValue(host, input, originalTitle);
+          flashField(input, true); // flash again each time D2L stomps it
+        }
+      }, 80);
+
+      const observer = new MutationObserver(() => {
+        if (!restoreActive) return;
+        if (input.value !== originalTitle) {
+          forceValue(host, input, originalTitle);
+        }
+      });
+
+      observer.observe(input, {
+        attributes: true,
+        attributeFilter: ['value'],
+        characterData: true,
+        childList: true,
+      });
+
+      setTimeout(() => {
+        restoreActive = false;
+        clearInterval(pollInterval);
+        observer.disconnect();
+        const tf2 = getTitleField();
+        if (tf2) {
+          forceValue(tf2.host, tf2.input, originalTitle);
+          flashField(tf2.input, true); // final confirmation flash
+        }
+        completeAction();
+      }, 2500);
+    }
+
+    function completeAction() {
+      if (pendingAction === 'save-and-close') {
+        const btn = findButton('save and close');
+        if (btn) btn.click();
+      }
+    }
+
+    // ---- intercept Save and Save and Close ---------------------------
+
+    document.addEventListener('click', function (e) {
+      if (transformDone) return;
+      const path = e.composedPath();
+      for (const el of path) {
+        if (el.tagName?.toLowerCase() === 'd2l-button') {
+          const text = el.textContent?.trim().toLowerCase();
+          if (text === 'save and close') {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            pendingAction = 'save-and-close';
+            const saveBtn = findButton('save');
+            if (saveBtn) saveBtn.click();
+            return;
+          }
+          if (text === 'save') {
+            pendingAction = 'save';
+            return;
+          }
+        }
+      }
+    }, true);
+
+    // ---- fetch intercept ---------------------------------------------
+
+    const originalFetch = window.fetch;
+    window.fetch = async function (...args) {
+      try {
+        const req    = args[0];
+        const isReq  = req instanceof Request;
+        const url    = isReq ? req.url    : String(req);
+        const method = isReq ? req.method : (args[1]?.method ?? 'GET');
+
+        if (
+          !transformDone &&
+          url.includes('content.api.brightspace.com') &&
+          url.includes('/files/') &&
+          !url.includes('/commit') &&
+          method.toUpperCase() === 'PATCH'
+        ) {
+          const bodyText = isReq ? await req.clone().text() : args[1]?.body;
+          if (bodyText && bodyText.includes('name="title"')) {
+            const titleMatch = bodyText.match(/(name="title"\r?\n\r?\n)([^\r\n-][^\r\n]*)/);
+            if (titleMatch) {
+              const currentTitle = titleMatch[2].trim();
+              const newTitle     = buildSlug(currentTitle);
+
+              if (newTitle && newTitle !== currentTitle) {
+                originalTitle = currentTitle;
+                const newBody = bodyText.replace(
+                  /(name="title"\r?\n\r?\n)[^\r\n-][^\r\n]*/,
+                  '$1' + newTitle
+                );
+                if (isReq) {
+                  const headers = {};
+                  req.headers.forEach((v, k) => headers[k] = v);
+                  args[0] = new Request(url, {
+                    method:      req.method,
+                    headers:     headers,
+                    body:        newBody,
+                    credentials: req.credentials,
+                    mode:        req.mode,
+                  });
+                } else {
+                  args[1] = { ...args[1], body: newBody };
+                }
+
+                transformDone = true;
+
+                return originalFetch.apply(this, args).then(response => {
+                  if (response.ok) {
+                    setTimeout(() => startRestore(), 800);
+                  } else {
+                    // Save failed — flash amber so it's obvious
+                    const tf = getTitleField();
+                    if (tf) flashField(tf.input, false);
+                  }
+                  return response;
+                });
+
+              } else {
+                transformDone = true;
+              }
+            }
+          }
+        }
+      } catch (_) {
+        // pass through unchanged
+      }
+
+      return originalFetch.apply(this, args);
+    };
+
+    // ---- clear "Untitled" default on load ----------------------------
+
+    function clearDefaultTitle() {
+      const tf = getTitleField();
+      if (!tf) return false;
+      const { host, input } = tf;
+      if (input.dataset.datedCleared) return true;
+      input.dataset.datedCleared = '1';
+      const current = input.value.trim();
+      if (current && current.toLowerCase() !== 'untitled' && !alreadyDated(current)) return true;
+      forceValue(host, input, '');
+      return true;
+    }
+
+    let tries = 0;
+    const wait = setInterval(() => {
+      if (clearDefaultTitle() || ++tries > 40) clearInterval(wait);
+    }, 300);
+  }
+
+  // ─── FOLDED IN: EDIT PAGE FILENAME & MANAGE FILES ──────────────────────
+  // Originally the standalone "Edit Page Filename & Manage Files" userscript.
+  // On existing pages, reads the topic id from the URL, GETs the documented
+  // content-topic endpoint, and shows the real backend filename next to the
+  // title field, with "Manage Files" and "Public Files" buttons. Ported
+  // verbatim aside from removing its own IIFE wrapper.
+  function initFilenameDisplayAndManageFiles() {
+    // ============================================================
+    // CONFIG  — if D2L changes something, this is the only place to edit
+    // ============================================================
+    const CFG = {
+      // documented LE API. 'unstable' matches what this instance's UI uses;
+      // pin to a number (e.g. '1.74') if you ever want it fixed.
+      leVersion: 'unstable',
+      versionsEndpoint: '/d2l/api/le/versions/',
+      topicEndpoint: (ou, ver, topicId) =>
+        `/d2l/api/le/${ver}/${ou}/content/topics/${topicId}`,
+
+      titleHostSelector: 'd2l-input-text#content-title',
+      titleLabelPrefix: 'page title',           // guards against grabbing the wrong input
+      editorSelector: 'd2l-activity-content-editor',
+
+      idResolveTimeoutMs: 6000,                  // fail loud after this if no id found
+      genericNames: [
+        'untitled', 'summary', 'overview', 'introduction', 'intro',
+        'page', 'content', 'new-page', 'topic', 'lesson', 'module',
+      ],
+    };
+
+    // Shared with the companion "Manage Files Locator" (now runManageFilesLocator()
+    // in this same file). Must match there.
+    const HANDOFF_KEY = 'd2l-mf-target';
+
+    // ============================================================
+    // STATE
+    // ============================================================
+    let state = null;
+    function freshState() {
+      return {
+        ou: null,
+        topicId: null,
+        filename: null,
+        path: null,         // full enforced path incl. folders, handed to Manage Files
+        fetchedFor: null,   // topicId we already looked up (dedupe)
+      };
+    }
+    // ============================================================
+    // GUARD — skip new-page contexts where no topic file exists yet
+    // ============================================================
+    function isNewPageContext() {
+      // 1) URL flag — D2L sets this when creating a brand-new topic
+      if (/[?&]isNew=true/i.test(location.search)) return true;
+
+      // 2) "New Page" heading — present when the editor opens for a
+      //    not-yet-saved HTML page. We avoid fragile IDs/classes and
+      //    instead walk the shadow DOM to find the <h1> inside the
+      //    navigation component, then test its text content.
+      const navHost = deepQuerySelector(document, 'd2l-labs-navigation-immersive');
+      if (navHost) {
+        // The h1 may be in light DOM children or inside a shadow slot
+        const h1 = navHost.querySelector('h1')
+          ?? (navHost.shadowRoot && navHost.shadowRoot.querySelector('h1'));
+        if (h1 && h1.textContent.trim() === 'New Page') return true;
+      }
+      return false;
+    }
+    // ============================================================
+    // URL / ID RESOLUTION
+    // ============================================================
+    function getOu() {
+      const m = location.href.match(/[?&]ou=(\d+)/);
+      if (m) return m[1];
+      const m2 = location.pathname.match(/\/lessons\/(\d+)\//);
+      if (m2) return m2[1];
+      const m3 = location.pathname.match(/\/(\d+)\//);
+      return m3 ? m3[1] : null;
+    }
+
+    // topic id from the URL. Two shapes, both reliable:
+    //   content view: /lessons/{ou}/topics/{id}
+    //   edit view:    /lessons/{ou}/edit/{activityId}/loadActivity/file/{topicId}
+    // The trailing file/{id} IS the topic id (confirmed: /topics/57361 == file/57361).
+    function topicIdFromLocation() {
+      const edit = location.pathname.match(/\/loadActivity\/file\/(\d+)/);
+      if (edit) return edit[1];
+      const view = location.pathname.match(/\/topics?\/(\d+)(?:$|\/|\?)/);
+      return view ? view[1] : null;
+    }
+
+    function isEditableContext() {
+      if (document.querySelector(CFG.editorSelector)) return true;
+      return /\/(topics?|edit)\//.test(location.pathname);
+    }
+
+    // ============================================================
+    // We keep a private, un-wrappable reference to the real fetch so our
+    // own GET can't be intercepted or broken by the SPA reassigning fetch.
+    // ============================================================
+    const _fetch = window.fetch.bind(window);
+
+    // ============================================================
+    // AUTHORITATIVE LOOKUP: documented GET → Url → filename
+    // ============================================================
+    let cachedVersion = null;
+    async function resolveVersion() {
+      if (cachedVersion) return cachedVersion;
+      if (CFG.leVersion && CFG.leVersion !== 'auto') { cachedVersion = CFG.leVersion; return cachedVersion; }
+      try {
+        const r = await _fetch(CFG.versionsEndpoint, { credentials: 'include' });
+        const arr = await r.json();
+        const le = Array.isArray(arr) ? arr.find(x => x.ProductCode === 'LE') || arr[0] : null;
+        cachedVersion = (le && le.LatestVersion) || 'unstable';
+      } catch (_) {
+        cachedVersion = 'unstable';
+      }
+      return cachedVersion;
+    }
+
+    function parseTopic(data) {
+      if (!data || typeof data !== 'object') return null;
+      // 1) classic ContentObject — the clean, plaintext path
+      if (typeof data.Url === 'string' && /\.(html?|htm)(\?|$)/i.test(data.Url)) {
+        return fromPath(data.Url);
+      }
+      // 2) content-service shape — name is plaintext; path is a bonus only
+      if (data.properties && data.properties.name) {
+        return { filename: data.properties.name, path: data.properties.name };
+      }
+      // 3) last resort: scan for any .html path
+      const hit = scanForHtml(data);
+      return hit ? fromPath(hit) : null;
+    }
+
+    function fromPath(rawPath) {
+      const clean = String(rawPath).split('?')[0];
+      let last = clean.split('/').filter(Boolean).pop() || clean;
+      try { last = decodeURIComponent(last); } catch (_) { /* keep raw */ }
+      return { filename: last, path: clean };
+    }
+
+    function scanForHtml(obj, depth = 0) {
+      if (depth > 6 || !obj || typeof obj !== 'object') return null;
+      for (const v of Object.values(obj)) {
+        if (typeof v === 'string' && /\.(html?|htm)(\?|$)/i.test(v)) return v;
+        if (v && typeof v === 'object') {
+          const r = scanForHtml(v, depth + 1);
+          if (r) return r;
+        }
+      }
+      return null;
+    }
+
+    async function runDetection() {
+      if (!state || !state.ou || !state.topicId) return;
+      if (state.fetchedFor === state.topicId) return;   // already done/in-flight
+      state.fetchedFor = state.topicId;
+
+      try {
+        const ver = await resolveVersion();
+        const url = CFG.topicEndpoint(state.ou, ver, state.topicId);
+        const res = await _fetch(url, {
+          credentials: 'include',
+          headers: { 'Accept': 'application/json' },
+        });
+        if (!res.ok) { showError(`lookup failed (HTTP ${res.status})`); return; }
+        const parsed = parseTopic(await res.json());
+        if (parsed) {
+          state.filename = parsed.filename;
+          state.path = parsed.path;
+          injectLabel();
+        } else {
+          showError('filename not in response');
+        }
+      } catch (e) {
+        showError('lookup error');
+      }
+    }
+
+    // ============================================================
+    // DOM — label injection
+    // ============================================================
+    function deepQuerySelector(root, selector) {
+      const found = root.querySelector(selector);
+      if (found) return found;
+      for (const el of root.querySelectorAll('*')) {
+        if (el.shadowRoot) {
+          const r = deepQuerySelector(el.shadowRoot, selector);
+          if (r) return r;
+        }
+      }
+      return null;
+    }
+
+    // Same traversal, but collect every match across open shadow roots.
+    function deepQuerySelectorAll(root, selector, acc = []) {
+      for (const el of root.querySelectorAll(selector)) acc.push(el);
+      for (const el of root.querySelectorAll('*')) {
+        if (el.shadowRoot) deepQuerySelectorAll(el.shadowRoot, selector, acc);
+      }
+      return acc;
+    }
+
+    function labelMatches(el) {
+      return (el.getAttribute('label') || '').toLowerCase().startsWith(CFG.titleLabelPrefix);
+    }
+
+    // Defense-in-depth: id and label are robust against DIFFERENT failures, so we
+    // try them in confidence order rather than requiring both.
+    //   1) id + label agree            → original strict match, most confident
+    //   2) label-only (any input)      → survives the #content-title id being renamed
+    //   3) id-only                     → survives the label changing / a non-English instance
+    function getTitleHost() {
+      const tag = CFG.titleHostSelector.split('#')[0];   // 'd2l-input-text'
+      const byId = deepQuerySelector(document, CFG.titleHostSelector);
+
+      if (byId && labelMatches(byId)) return byId;                 // 1
+      const byLabel = deepQuerySelectorAll(document, tag).find(labelMatches);
+      if (byLabel) return byLabel;                                 // 2
+      return byId || null;                                         // 3
+    }
+
+    function isGeneric(name) {
+      return CFG.genericNames.some(w => name.toLowerCase().includes(w));
+    }
+    function isDateSlug(name) { return /\d{8}/.test(name); }
+
+    function stripPrefix(p, fallback) {
+      const s = String(p || fallback || '')
+        .split('?')[0]
+        .replace(/^https?:\/\/[^/]+/, '')
+        .replace(/^.*\/enforced\/\d+-[^/]+\//, '')
+        .replace(/^.*\/enforced\/\d+\//, '')
+        .replace(/^\/content\/[^/]+\//, '');
+      return s || fallback;
+    }
+
+    // Remove every label we may have placed — in BOTH the light DOM and the title
+    // host's shadow root. The label lives INSIDE the component's shadow root, so a
+    // plain document.querySelectorAll misses it (that was a real dedupe blind spot).
+    function removeAllLabels(host) {
+      document.querySelectorAll('#d2l-filename-display').forEach(el => el.remove());
+      const root = host && host.getRootNode && host.getRootNode();
+      if (root && root !== document && root.querySelectorAll) {
+        root.querySelectorAll('#d2l-filename-display').forEach(el => el.remove());
+      }
+    }
+
+    // Idempotent: clears any existing label (incl. shadow-root orphans) and
+    // recreates exactly one as the LIVE host's next sibling, in the host's own
+    // document so it lands in the correct (shadow) tree.
+    function ensureContainer() {
+      const host = getTitleHost();
+      if (!host) return null;
+      removeAllLabels(host);
+      const el = (host.ownerDocument || document).createElement('div');
+      el.id = 'd2l-filename-display';
+      host.insertAdjacentElement('afterend', el);
+      return el;
+    }
+
+    // ============================================================
+    // KEEP-ALIVE — the title component <d2l-activity-content-editor-title> is
+    // re-rendered/replaced during load (confirmed via lifecycle diagnostic), which
+    // destroys its shadow root and any label we injected into it. A one-shot inject
+    // loses that race → the label flashes and vanishes. So we watch the DOM and
+    // re-attach the resolved label whenever it goes missing from the LIVE host's
+    // root. Existence check is cheap and prevents needless churn.
+    // ============================================================
+    function labelHealthy() {
+      const host = getTitleHost();
+      if (!host) return true;                  // no host yet → nothing to maintain
+      const root = host.getRootNode();
+      return !!(root && root.querySelector && root.querySelector('#d2l-filename-display'));
+    }
+
+    function maintainLabel() {
+      if (labelHealthy()) return;
+      if (state && state.filename) injectLabel();   // restore the resolved label
+      else if (state) showLoading();                // or the placeholder, pre-resolution
+    }
+
+    let maintainScheduled = false;
+    function scheduleMaintain() {
+      if (maintainScheduled) return;
+      maintainScheduled = true;
+      setTimeout(() => { maintainScheduled = false; maintainLabel(); }, 120);
+    }
+
+    function installKeepAlive() {
+      if (installKeepAlive.done) return;            // once per page
+      installKeepAlive.done = true;
+      new MutationObserver(scheduleMaintain)
+        .observe(document.documentElement, { childList: true, subtree: true });
+    }
+
+    function baseStyle(el, bg, fg, border) {
+      el.style.cssText = `
+        font-size:0.75rem;font-family:inherit;margin-top:5px;padding:3px 8px;
+        border-radius:4px;display:inline-flex;align-items:center;gap:6px;
+        background:${bg};color:${fg};border:1px solid ${border};
+        user-select:text;flex-wrap:wrap;`;
+    }
+
+    function showLoading() {
+      // never replace an already-resolved label with a placeholder
+      if (state && state.filename) return;
+      const el = ensureContainer();
+      if (!el) return;
+      baseStyle(el, '#f8f8f8', '#888', '#e0e0e0');
+      el.textContent = '📄 detecting filename…';
+    }
+
+    function showError(msg) {
+      try { console.warn('[D2L-FN]', msg, '|', location.href); } catch (_) {}
+      const el = ensureContainer();
+      if (!el) return;
+      baseStyle(el, '#fdecea', '#a33', '#f5c2c0');
+      el.textContent = `⚠️ ${msg}`;
+    }
+
+    function injectLabel() {
+      const host = getTitleHost();
+      if (!host || !state || !state.filename) return;
+      const el = ensureContainer();
+      if (!el) return;
+
+      const name = state.filename;
+      const warn = isGeneric(name) && !isDateSlug(name);
+      const display = stripPrefix(state.path, name);
+      baseStyle(el, warn ? '#fff3cd' : '#f0f4f8', warn ? '#856404' : '#4a5568', warn ? '#ffc107' : '#cbd5e0');
+      el.title = state.path || name;
+
+      el.innerHTML = `
+        <span>${warn ? '⚠️' : '📄'}</span>
+        <span><strong style="font-weight:600">filename:</strong>
+          <span style="font-family:monospace">${escapeHtmlLocal(display)}</span></span>
+        ${warn ? `<span style="font-size:0.7rem;opacity:0.75">(generic name)</span>` : ''}
+        <a href="#" id="d2l-manage-files-link" title="Open Manage Files and highlight this file"
+          style="margin-left:6px;padding:2px 7px;border-radius:3px;
+          background:${warn ? '#fff0b3' : '#e2e8f0'};color:${warn ? '#7c5a00' : '#2b4a7a'};
+          border:1px solid ${warn ? '#f0c040' : '#a0aec0'};font-size:0.7rem;
+          text-decoration:none;white-space:nowrap;">🗂️ Manage Files</a>
+        <a href="#" id="d2l-public-files-link" title="Open Public Files"
+          style="margin-left:4px;padding:2px 7px;border-radius:3px;
+          background:#e6ffed;color:#1a5c2e;
+          border:1px solid #7bc99a;font-size:0.7rem;
+          text-decoration:none;white-space:nowrap;">🌐 Public Files</a>`;
+
+      el.querySelector('#d2l-manage-files-link').addEventListener('click', e => {
+        e.preventDefault();
+        openManageFiles(name, state.path || name);
+      });
+        el.querySelector('#d2l-public-files-link').addEventListener('click', e => {
+        e.preventDefault();
+        const url = 'https://brightspace.rcpi.ie/d2l/lp/manageFiles/main.d2l?g=1&ou=6606';
+        const w = 1100, h = 700;
+        const left = Math.round((screen.width - w) / 2);
+        const top = Math.round((screen.height - h) / 2);
+        const popup = window.open(url, 'd2l_public_files_popup',
+          `width=${w},height=${h},left=${left},top=${top},resizable=yes,scrollbars=yes`);
+        if (!popup) window.open(url, '_blank');
+      });
+    }
+
+    // Locally named to avoid any ambiguity with the block-builder's own
+    // top-level escapeHtml() elsewhere in this file — behaviour is identical.
+    function escapeHtmlLocal(s) {
+      return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    // ============================================================
+    // HANDOFF — write the target, open the popup. runManageFilesLocator()
+    // (matched on the Manage Files URL, at the top of this file) reads the
+    // target on load.
+    // We always open fresh so the Locator's on-load handler re-fires every
+    // click; the named window simply reloads.
+    // ============================================================
+    // ⚠️ PAIRED PATH: this must stay in sync with the manageFiles @match at
+    // the top of this file, and with the pathname check that dispatches to
+    // runManageFilesLocator(). If D2L ever moves this tool, update all of
+    // them — otherwise this opens a page the locator branch isn't watching.
+    function manageFilesUrl() {
+      return `/d2l/lp/manageFiles/main.d2l?ou=${encodeURIComponent(state.ou)}`;
+    }
+
+    function openManageFiles(filename, fullPath) {
+      try {
+        localStorage.setItem(HANDOFF_KEY, JSON.stringify({
+          path: fullPath,
+          filename,
+          ou: state.ou,
+          ts: Date.now(),
+        }));
+      } catch (_) { /* private mode / quota — popup still opens, just no auto-jump */ }
+
+      const url = manageFilesUrl();
+      const w = 1100, h = 700;
+      const left = Math.round((screen.width - w) / 2);
+      const top = Math.round((screen.height - h) / 2);
+      const popup = window.open(url, 'd2l_manage_files_popup',
+        `width=${w},height=${h},left=${left},top=${top},resizable=yes,scrollbars=yes`);
+      if (!popup) window.open(url, '_blank');   // popup blocked → plain tab
+    }
+
+    // ============================================================
+    // ORCHESTRATION + SPA navigation handling
+    // ============================================================
+    let runToken = 0;
+    let activeInterval = null;
+
+    function start() {
+      if (!isEditableContext()) return;
+      if (isNewPageContext()) return;
+      installKeepAlive();                  // re-attach the label across component re-renders
+      const myToken = ++runToken;          // only the latest start() stays live
+      if (activeInterval) clearInterval(activeInterval);
+
+      state = freshState();
+      state.ou = getOu();
+      state.topicId = topicIdFromLocation();
+
+      // wait for the title field, show a placeholder, kick the lookup
+      let tries = 0;
+      activeInterval = setInterval(() => {
+        if (myToken !== runToken) { clearInterval(activeInterval); return; }
+        const host = getTitleHost();
+        if (host) {
+          clearInterval(activeInterval);
+          if (!state.topicId) { showError('no topic id in URL'); return; }
+          if (!state.filename) showLoading();
+          runDetection();
+          setTimeout(() => {
+            if (myToken !== runToken) return;
+            const el = document.getElementById('d2l-filename-display');
+            if (el && !state.filename) showError('lookup timed out');
+          }, CFG.idResolveTimeoutMs);
+        } else if (++tries > 60) {
+          clearInterval(activeInterval);
+        }
+      }, 250);
+    }
+
+    // Re-run only if the user navigates to a genuinely different topic.
+    let lastTopicId = null;
+    function onNav() {
+      const id = topicIdFromLocation();
+      if (!id || id === lastTopicId) return;   // same page / no real change → do nothing
+      lastTopicId = id;
+      removeAllLabels(getTitleHost());
+      if (isNewPageContext()) return;
+      start();
+    }
+    window.addEventListener('popstate', onNav);
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', () => { lastTopicId = topicIdFromLocation(); start(); });
+    } else {
+      lastTopicId = topicIdFromLocation();
+      start();
+    }
+  }
+
+  // ─── FOLDED IN: MANAGE FILES LOCATOR (popup) ───────────────────────────
+  // Originally the standalone "D2L Manage Files Locator" script. Runs
+  // inside the Manage Files popup (dispatched to at the very top of this
+  // file). Reads the target path handed off via localStorage, scrolls the
+  // legacy YUI file list (lazy-loaded), navigates into subfolders if
+  // needed, and highlights the matching file. Ported verbatim aside from
+  // removing its own IIFE wrapper.
+  function runManageFilesLocator() {
+    // ============================================================
+    // CONFIG  — confirmed selectors for this instance. The only place
+    // to edit if D2L changes the Manage Files (legacy YUI) markup.
+    // ============================================================
+    const CFG = {
+      mf: {
+        // First-try class for the scrollable file-list pane. If D2L renames it,
+        // getScroller() falls back to anchoring on the rows and climbing to the
+        // nearest real scroll container — see getScroller().
+        scroller: '.dsl_p_m',
+        rowCheckbox: 'input[name="z_o_s"]',     // value = full enforced path (folders end in /)
+      },
+    };
+
+    // Shared with initFilenameDisplayAndManageFiles() above. Must match there.
+    const HANDOFF_KEY = 'd2l-mf-target';
+
+    // Belt-and-suspenders only: the real safety is consume-on-read below.
+    // The popup loads in well under a second, so this is never hit in the
+    // normal flow; it just stops us acting on a stale leftover after a crash.
+    const MAX_AGE_MS = 10 * 60 * 1000;          // 10 minutes
+
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+    // ============================================================
+    // PATH HELPERS
+    // ============================================================
+    function stripPrefix(p, fallback) {
+      const s = String(p || fallback || '')
+        .split('?')[0]
+        .replace(/^https?:\/\/[^/]+/, '')
+        .replace(/^.*\/enforced\/\d+-[^/]+\//, '')
+        .replace(/^.*\/enforced\/\d+\//, '')
+        .replace(/^\/content\/[^/]+\//, '');
+      return s || fallback;
+    }
+
+    function folderInfo(path, fallback) {
+      const rel = stripPrefix(path, fallback);
+      const parts = rel.split('/').filter(Boolean);
+      const filename = parts.pop() || fallback;
+      return { folders: parts, filename };
+    }
+
+    // ============================================================
+    // BANNER
+    // ============================================================
+    function makeBanner(pdoc, text) {
+      pdoc.getElementById('d2l-tamper-banner')?.remove();
+      const b = pdoc.createElement('div');
+      b.id = 'd2l-tamper-banner';
+      b.style.cssText = `position:fixed;top:0;left:0;right:0;z-index:99999;background:#fef3c7;
+        border-bottom:2px solid #f59e0b;padding:8px 16px;font-family:sans-serif;font-size:13px;
+        display:flex;align-items:center;gap:10px;color:#78350f;box-sizing:border-box;`;
+      b.innerHTML = `<span>📄</span><span id="d2l-tamper-banner-text"></span>
+        <button type="button" style="margin-left:auto;background:none;border:1px solid #f59e0b;
+        border-radius:4px;padding:2px 8px;cursor:pointer;color:#78350f;font-size:12px;">✕</button>`;
+      b.querySelector('#d2l-tamper-banner-text').textContent = text;
+      b.querySelector('button').addEventListener('click', () => b.remove());
+      pdoc.body.insertAdjacentElement('afterbegin', b);
+      return b;
+    }
+    function setBanner(b, t) { const s = b?.querySelector('#d2l-tamper-banner-text'); if (s) s.textContent = t; }
+    // Failure path: show it in the banner AND leave a greppable console breadcrumb,
+    // so a problem months from now can be filtered from the console (it never fires
+    // on success).
+    function setFail(b, t) { setBanner(b, t); try { console.warn('[D2L-MF]', t, '|', location.href); } catch (_) {} }
+
+    // ============================================================
+    // ⚠️ DOM-DRIVEN SECTION (fragile) — drives the legacy Manage Files DOM,
+    // so this is the part most likely to need future patching. Logic is
+    // unchanged from the original; it just runs against this popup's own
+    // `document` instead of reaching across `window.opener`.
+    // ============================================================
+    // Navigate into each path segment in turn. A folder opens via a delegated JS
+    // click handler on its name link (href is "javascript://", onclick is null) —
+    // so we must dispatch a real click on that <a>.
+    //
+    // Fragility note: we anchor on the STICKIEST signals, not YUI classes —
+    //   • find the folder by its z_o_s checkbox value ending in /{segment}/  (the
+    //     form-name + enforced-path contract), scrolling to load it if needed;
+    //   • pick the link by matching the anchor whose visible text == the folder
+    //     name (locale-independent — the name is our data). Name-cell/class and
+    //     "first anchor in row" are fallbacks only.
+    async function navFolders(pdoc, folders, banner) {
+      for (const seg of folders) {
+        setBanner(banner, `Opening folder: ${seg}`);
+        const row = await findFolderRow(pdoc, seg, banner);
+        if (!row) { setFail(banner, `Could not find folder "${seg}" — is it spelled exactly as in the path?`); return false; }
+
+        const link = folderLink(row, seg);
+        if (!link) { setFail(banner, `Folder "${seg}" row has no clickable name link — the Manage Files layout may have changed.`); return false; }
+
+        const before = listingSignature(pdoc);
+        link.scrollIntoView({ block: 'center' });
+        await sleep(120);
+        link.click();                      // delegated handler navigates the listing
+
+        const changed = await waitForListingChange(pdoc, before);
+        if (!changed) { setFail(banner, `Clicked folder "${seg}" but the list never changed — folder navigation may have changed.`); return false; }
+      }
+      return true;
+    }
+
+    // Scroll-find the folder row whose z_o_s value ends in /{segment}/.
+    async function findFolderRow(pdoc, seg, banner) {
+      const want = '/' + seg.toLowerCase() + '/';
+      const find = () => {
+        for (const cb of pdoc.querySelectorAll(CFG.mf.rowCheckbox)) {
+          if ((cb.value || '').toLowerCase().endsWith(want)) return cb.closest('tr');
+        }
+        return null;
+      };
+      let row = find();
+      if (row) return row;
+      let prevH = -1, prevN = -1, stuck = 0;
+      for (let i = 0; i < 120 && !row; i++) {
+        const sc = getScroller(pdoc);
+        const n = pdoc.querySelectorAll(CFG.mf.rowCheckbox).length;
+        setBanner(banner, `Finding folder ${seg}… (${n} rows)`);
+        sc.scrollTop = sc.scrollHeight;
+        await sleep(i < 5 ? 600 : 400);
+        row = find();
+        const grew = sc.scrollHeight !== prevH || n !== prevN;
+        if (!grew) { if (++stuck >= 4) break; } else { stuck = 0; }
+        prevH = sc.scrollHeight; prevN = n;
+      }
+      return row || find();
+    }
+
+    // Confidence order: visible text == folder name → Name-cell link → first <a>.
+    function folderLink(row, seg) {
+      if (!row) return null;
+      const anchors = Array.from(row.querySelectorAll('a'));
+      const byText = anchors.find(a => (a.textContent || '').trim().toLowerCase() === seg.toLowerCase());
+      if (byText) return byText;
+      const nameCell = row.querySelector('td[class*="col-Name"], td[headers*="Name"]');
+      const nameLink = nameCell && nameCell.querySelector('a');
+      return nameLink || anchors[0] || null;
+    }
+
+    // A cheap fingerprint of the current listing — count + first/last row value.
+    // Changes when we navigate into a folder (the whole table reloads).
+    function listingSignature(pdoc) {
+      const v = Array.from(pdoc.querySelectorAll(CFG.mf.rowCheckbox)).map(cb => cb.value || '');
+      return v.length + '|' + (v[0] || '') + '|' + (v[v.length - 1] || '');
+    }
+
+    // Wait for the listing to change from `before`, then settle.
+    async function waitForListingChange(pdoc, before) {
+      const start = Date.now(); let last = null, stable = 0;
+      while (Date.now() - start < 8000) {
+        const sig = listingSignature(pdoc);
+        if (sig !== before) {
+          if (sig === last) { if (++stable >= 3) return true; } else { stable = 0; last = sig; }
+        }
+        await sleep(200);
+      }
+      return false;
+    }
+
+    async function findRowAutoScroll(pdoc, name, banner) {
+      let prevH = -1, prevRows = -1, stuck = 0;
+      for (let i = 0; i < 120; i++) {
+        let row = findRowNow(pdoc, name);
+        if (row) return row;
+        const sc = getScroller(pdoc);
+        if (!sc) { await sleep(500); continue; }
+
+        const rows = pdoc.querySelectorAll(CFG.mf.rowCheckbox).length;
+        setBanner(banner, `Loading file list… (${rows} so far)`);
+
+        sc.scrollTop = sc.scrollHeight;
+        await sleep(i < 5 ? 700 : 450);
+        row = findRowNow(pdoc, name); if (row) return row;
+
+        // stop when neither the height nor the row count grows across a few tries
+        const grew = sc.scrollHeight !== prevH || rows !== prevRows;
+        if (!grew) { if (++stuck >= 4) break; } else { stuck = 0; }
+        prevH = sc.scrollHeight; prevRows = rows;
+      }
+      return findRowNow(pdoc, name);
+    }
+
+    // Try the declared class first (fast, exact). If it's gone — or it isn't
+    // actually the scrolling element — anchor on something stable (the rows,
+    // matched by their form `name`) and climb to the nearest ancestor that
+    // genuinely scrolls. Class is a convenience; structure is the safety net.
+    function isScrollable(el, view) {
+      if (!el || el.nodeType !== 1) return false;
+      const oy = view.getComputedStyle(el).overflowY;
+      return (oy === 'auto' || oy === 'scroll') && el.scrollHeight > el.clientHeight + 50;
+    }
+
+    function getScroller(pdoc) {
+      const view = pdoc.defaultView || window;
+
+      // 1) AUTHORITATIVE — the scroll container that actually HOLDS the file rows.
+      //    This page has several .dsl_p_m panes and more than one of them scrolls
+      //    (the folder-tree pane is a scrollable decoy), so picking "the first
+      //    .dsl_p_m that scrolls" grabs the wrong one. Anchor on a row and climb to
+      //    its nearest scrolling ancestor — that is, by definition, the file list.
+      const anchor = pdoc.querySelector(CFG.mf.rowCheckbox);
+      const start = anchor ? (anchor.closest('table') || anchor) : null;
+      for (let el = start; el; el = el.parentElement) {
+        if (isScrollable(el, view)) return el;
+      }
+
+      // 2) declared class, but only a pane that BOTH contains rows AND scrolls
+      for (const pane of pdoc.querySelectorAll(CFG.mf.scroller)) {
+        if (pane.querySelector(CFG.mf.rowCheckbox) && isScrollable(pane, view)) return pane;
+      }
+
+      // 3) last resorts: any declared pane, then the page itself
+      return pdoc.querySelector(CFG.mf.scroller) || pdoc.scrollingElement || pdoc.documentElement;
+    }
+
+    // Checkbox value is a TYPE-PREFIXED full enforced path, e.g.
+    //   d_/content/enforced/{ou}-{course}/banners/      (folder — trailing slash)
+    //   f_/content/enforced/{ou}-{course}/Lesson X.html (file — no trailing slash)
+    // We match on the path ENDING in our filename, so the d_/f_ prefix and any
+    // leading folders are irrelevant, and spaces/parens are handled exactly.
+    function findRowNow(pdoc, name) {
+      const lower = name.toLowerCase();
+      for (const cb of pdoc.querySelectorAll(CFG.mf.rowCheckbox)) {
+        const val = (cb.value || '').replace(/\/+$/, '');   // trim trailing slash
+        if (val.toLowerCase().endsWith('/' + lower) || val.toLowerCase() === lower) {
+          return cb.closest('tr');
+        }
+      }
+      return null;
+    }
+
+    function highlight(pdoc, row) {
+      row.style.background = '#fff9c4';
+      row.style.outline = '2px solid #f59e0b';
+      row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const cb = row.querySelector('input[type="checkbox"]');
+      if (cb) cb.checked = true;
+    }
+
+    // ============================================================
+    // ENTRY — read the handoff (one-shot), then locate.
+    // ============================================================
+    function readTarget() {
+      let raw;
+      try { raw = localStorage.getItem(HANDOFF_KEY); } catch (_) { return null; }
+      if (!raw) return null;
+      // consume immediately so a stray reload/manual open never re-triggers
+      try { localStorage.removeItem(HANDOFF_KEY); } catch (_) {}
+      let t;
+      try { t = JSON.parse(raw); } catch (_) { return null; }
+      if (!t || !t.filename) return null;
+      if (t.ts && (Date.now() - t.ts) > MAX_AGE_MS) return null;   // stale leftover
+      return t;
+    }
+
+    async function run(target) {
+      const { folders, filename } = folderInfo(target.path, target.filename);
+      const banner = makeBanner(document, `Looking for ${filename}…`);
+      try {
+        const navOk = await navFolders(document, folders, banner);
+        if (!navOk) return;             // banner already names the folder that failed
+        setBanner(banner, 'Scanning file list…');
+        const row = await findRowAutoScroll(document, filename, banner);
+        if (row) {
+          highlight(document, row);
+          setBanner(banner, `Highlighted: ${filename} — use the ⌄ arrow to rename`);
+        } else {
+          // Distinguish the two very different failures: we COULD read the list but
+          // the name isn't here (a name/location problem — the common case), versus
+          // we couldn't read any rows at all (the Manage Files tool likely changed).
+          const rows = document.querySelectorAll(CFG.mf.rowCheckbox).length;
+          if (rows > 0) {
+            setFail(banner, `Scanned ${rows} item(s) in this folder — none named "${filename}". Check the exact name and extension.`);
+          } else {
+            setFail(banner, `Couldn't read any files here — the folder may be empty, or the Manage Files list structure has changed.`);
+          }
+        }
+      } catch (e) {
+        setFail(banner, `Stopped: an error occurred while scanning the file list.`);
+        try { console.warn('[D2L-MF] exception', e); } catch (_) {}
+      }
+    }
+
+    function init() {
+      const target = readTarget();
+      if (!target) return;            // opened manually / no fresh handoff → stay quiet
+      run(target);
+    }
+
+    if (document.body) init();
+    else document.addEventListener('DOMContentLoaded', init, { once: true });
   }
 
   // ─── INIT ───────────────────────────────────────────────────────────────────
