@@ -1,0 +1,1 @@
+(window.RCPI_REQUIRE_TEST = window.RCPI_REQUIRE_TEST || []).push('github');
