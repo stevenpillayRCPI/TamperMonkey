@@ -136,10 +136,66 @@
     setTimeout(() => { el.classList.remove('show'); setTimeout(() => el.remove(), 300); }, 2600);
   }
 
+  // Before locating, force open every collapsed ancestor (accordion panel,
+  // reveal panel, inactive tab pane, inactive carousel slide) so the target
+  // is actually visible to scroll to. This is why Locate looked broken for
+  // anything nested inside closed content in view mode: view-mode runtime
+  // JS (bootstrap-custom-cleanup.js) actively collapses these on load,
+  // whereas the TinyMCE editor never wires that behaviour up, so edit mode
+  // never hit this. Matches the exact class/attribute patterns the runtime
+  // cleanup script and the block builder's own templates use.
+  function revealAncestors(el) {
+    if (!el) return;
+    let node = el.parentElement;
+    const seenDoc = el.ownerDocument || document;
+    while (node) {
+      // Bootstrap collapse (accordion body, reveal-table row, standalone
+      // reveal panel) — panel carries .collapse, only .show when open.
+      if (node.classList && node.classList.contains('collapse') && !node.classList.contains('show')) {
+        node.classList.add('show');
+        node.setAttribute('aria-hidden', 'false');
+        let trigger = node.id ? seenDoc.querySelector(`[data-bs-target="#${cssEsc(node.id)}"]`) : null;
+        if (!trigger) {
+          const accItem = node.closest('.accordion-item');
+          if (accItem) trigger = accItem.querySelector('.accordion-button');
+        }
+        if (!trigger) {
+          const revealContainer = node.closest('.reveal-container');
+          if (revealContainer) trigger = revealContainer.querySelector('.reveal-button');
+        }
+        if (trigger) { trigger.classList.remove('collapsed'); trigger.setAttribute('aria-expanded', 'true'); }
+      }
+      // <details> not open.
+      if (node.tagName === 'DETAILS' && !node.open) node.open = true;
+      // Inactive tab pane — activate it and its nav-link.
+      if (node.classList && node.classList.contains('tab-pane') && !node.classList.contains('active')) {
+        const tabContent = node.parentElement;
+        if (tabContent) Array.from(tabContent.children).forEach(p => { if (p.classList && p.classList.contains('tab-pane')) p.classList.toggle('active', p === node); });
+        if (node.id) {
+          const navLink = seenDoc.querySelector(`[data-bs-target="#${cssEsc(node.id)}"], [aria-controls="${cssEsc(node.id)}"]`);
+          if (navLink) {
+            const nav = navLink.closest('.nav, [role="tablist"]');
+            if (nav) nav.querySelectorAll('.nav-link').forEach(l => l.classList.toggle('active', l === navLink));
+            navLink.setAttribute('aria-selected', navLink === navLink ? 'true' : 'false');
+          }
+        }
+      }
+      // Inactive carousel slide — activate it, deactivate siblings.
+      if (node.classList && node.classList.contains('carousel-item') && !node.classList.contains('active')) {
+        const inner = node.parentElement;
+        if (inner) Array.from(inner.children).forEach(s => { if (s.classList && s.classList.contains('carousel-item')) s.classList.toggle('active', s === node); });
+      }
+      // Generic inline-hidden safety net.
+      if (node.style && node.style.display === 'none') node.style.display = '';
+      node = node.parentElement;
+    }
+  }
+
   // Scroll a rendered element into view and flash it (view-mode locate).
   function locateInPage(el) {
     if (!el) return;
     try {
+      revealAncestors(el);
       el.scrollIntoView({ behavior: 'smooth', block: 'center' });
       el.classList.add('rcpi-locate-flash');
       setTimeout(() => el.classList.remove('rcpi-locate-flash'), 2200);
@@ -421,6 +477,10 @@
     'see here', 'see more', 'view', 'view here', 'source', 'reference', 'article', 'full text'
   ]);
   const BRIGHTSPACE_HOST_RE = /^https?:\/\/brightspace\.rcpi\.ie/i;
+  // DOI/PubMed/PMC citation links are conventionally displayed as bare URLs
+  // in academic reference lists ("Available at: https://doi.org/...") — the
+  // bare-URL link-text check below should not flag these as a hygiene issue.
+  const CITATION_URL_RE = /doi\.org|pubmed\.ncbi\.nlm\.nih\.gov|ncbi\.nlm\.nih\.gov\/pmc/i;
   const FILE_TYPE_RE = /\.(pdf|docx?|pptx?|xlsx?|zip|mp4|mp3|mov|xls[xm]?)$/i;
   const FILE_LABEL_RE = /(pdf|word|doc|pptx?|excel|xlsx?|zip|mp4|mp3|video|audio|download|spreadsheet|presentation)/i;
   const FILENAME_ALT_RE = /^[\w.\-_]+\.(png|jpe?g|gif|svg|webp|bmp|tiff?)$/i;
@@ -519,7 +579,7 @@
       const low = text.toLowerCase().replace(/[^a-z ]/g, '').trim();
       if (!text) note('error', 'Links', a, 'Link has no visible text; screen reader users will hear the URL only', null);
       else if (NONDESCRIPTIVE_LINK_TEXT.has(low)) note('warn', 'Links', a, `Non-descriptive link text: "${text}"`, null);
-      else if (/^https?:/i.test(text)) note('warn', 'Links', a, `Link text is a bare URL: ${text.slice(0, 60)}`, 'fix-bare-url');
+      else if (/^https?:/i.test(text) && !CITATION_URL_RE.test(href) && !/available\s+(at|from)/i.test((a.parentElement && a.parentElement.textContent) || '')) note('warn', 'Links', a, `Link text is a bare URL: ${text.slice(0, 60)}`, 'fix-bare-url');
       if (FILE_TYPE_RE.test(href) && !FILE_LABEL_RE.test(text) && !FILE_LABEL_RE.test(a.getAttribute('title') || '')) {
         const ext = (href.match(FILE_TYPE_RE) || [, 'file'])[1];
         note('warn', 'Links', a, `Link to .${ext} file has no file type in its text`, null);
@@ -549,7 +609,10 @@
     });
 
     body.querySelectorAll('b').forEach(el => note('info', 'Semantics', el, `<b> used for "${el.textContent.trim().slice(0, 30)}"; use <strong> for emphasis, or CSS for visual-only bold`, 'b-to-strong'));
-    body.querySelectorAll('i').forEach(el => note('info', 'Semantics', el, `<i> used for "${el.textContent.trim().slice(0, 30)}"; use <em> for emphasis, or CSS for visual-only italic`, 'i-to-em'));
+    // No <i> → <em> check: <i> is the established convention for icon fonts
+    // in this codebase (e.g. <i class="bi bi-card-list">), so a blanket
+    // "semantic italics" check has no reliable way to tell an icon from
+    // genuine italic text — removed rather than risk flagging icons.
 
     body.querySelectorAll('p, li, td, th, span, a, h1, h2, h3, h4, h5, h6, button, label').forEach(el => {
       if (el.children.length || !el.textContent.trim()) return;
@@ -616,7 +679,7 @@
 
     body.querySelectorAll('a[target="_blank"]').forEach(a => {
       const context = a.textContent + ' ' + (a.getAttribute('aria-label') || '');
-      if (!NEW_WINDOW_WARNING_RE.test(context)) note('warn', 'Links', a, 'Link opens in a new tab with no warning text for screen reader users', null);
+      if (!NEW_WINDOW_WARNING_RE.test(context)) note('warn', 'Links', a, 'Link opens in a new tab with no warning text for screen reader users', 'add-new-window-note');
     });
 
     body.querySelectorAll('p, li, td').forEach(el => {
@@ -656,7 +719,15 @@
       if (curr > prev + 1) note('warn', 'Headings', headings[i], `Heading level skipped (h${prev} → h${curr}); levels should increment by one`, 'fix-skipped-heading');
     }
 
+    // A "meaningful content" element inside a p/heading (image, iframe,
+    // embed, etc.) means it is NOT empty even though its textContent is —
+    // this guard exists because the emptiness check below previously judged
+    // purely by textContent and would flag (and the Edit Toolkit would then
+    // delete) a <p> whose only content was e.g. an <iframe>, silently
+    // destroying embedded content. Never drop this guard.
+    const MEANINGFUL_EMBED_SELECTOR = 'img, iframe, embed, object, video, audio, svg, canvas, table, form, button, a[href], input, select, textarea';
     body.querySelectorAll('p, li, td, th, h1, h2, h3, h4, h5, h6').forEach(el => {
+      if (el.querySelector(MEANINGFUL_EMBED_SELECTOR)) return; // has real content — never emptyish
       const html = el.innerHTML.trim();
       const text = el.textContent.trim().replace(/\u00a0/g, '');
       const isEmptyish = !text || html === '&nbsp;' || html === '<br>' || html === '<br />' || /^(&nbsp;)?<br\s*\/?>$/i.test(html);
@@ -772,9 +843,13 @@
     return m ? m[1] : null;
   }
   function extractRawPmcid(el) {
+    if (hasPmcidLink(el)) return null;
     PMCID_RE.lastIndex = 0;
     const m = PMCID_RE.exec(el.textContent || '');
     return m ? m[1] : null;
+  }
+  function hasPmcidLink(el) {
+    return [...el.querySelectorAll('a[href]')].some(a => /ncbi\.nlm\.nih\.gov\/pmc\/articles\/PMC\d+/i.test(a.getAttribute('href') || ''));
   }
   function collectPmids(el) {
     const pmids = [];
@@ -1066,7 +1141,12 @@
         panelsEl.querySelectorAll('.rcpi-shell-tabpanel').forEach(p => p.classList.remove('active'));
         btn.classList.add('active');
         body.classList.add('active');
-        if (t.render) { try { t.render(body); rendered[t.id] = true; } catch (e) { body.textContent = 'Error rendering tab.'; } }
+        // Render on first visit only. Re-invoking render() on every click
+        // is exactly what caused Links/Citations to silently re-run their
+        // network probes each time the tab was revisited — a tab's own
+        // "Rescan"/"Check" button (or shell.rerender()) is the only
+        // intended way to trigger that again.
+        if (t.render && !rendered[t.id]) { try { t.render(body); rendered[t.id] = true; } catch (e) { body.textContent = 'Error rendering tab.'; } }
       });
     });
 
@@ -1106,8 +1186,13 @@
       try { _GMset(W_KEY, String(parseInt(panel.style.width, 10))); } catch {}
     });
 
-    // Restore persisted minimised state.
-    try { if (_GMget(MIN_KEY, '0') === '1') setMinimized(true); } catch {}
+    // Restore persisted minimised state; if never set, fall back to
+    // opts.defaultMinimized (Audit defaults closed — see rebuild notes).
+    try {
+      const persisted = _GMget(MIN_KEY, null);
+      if (persisted === '1') setMinimized(true);
+      else if (persisted === null && opts.defaultMinimized) setMinimized(true);
+    } catch {}
 
     return {
       panel, minbar,
@@ -1122,11 +1207,17 @@
     if (doc.getElementById('rcpi-shell-css')) return;
     const s = doc.createElement('style');
     s.id = 'rcpi-shell-css';
+    // Matches the Edit Toolkit's actual chrome (#bb-tk-panel and friends) —
+    // same header treatment, underline-style tabs, spacing, and button
+    // tokens — so the two toolkits read as one family rather than two
+    // differently-designed panels. Kept under its own rcpi-shell-* class
+    // names (not literally shared bb-* classes) since the two scripts can
+    // never be certain they aren't both present in the same top document.
     s.textContent = `
       .rcpi-shell {
         position: fixed; top: 0; bottom: 0; z-index: 2000000;
         display: flex; flex-direction: column;
-        background: #f4f6f8; color: #1b2733;
+        background: #fff; color: #1b2733;
         font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         box-shadow: 0 0 14px rgba(0,0,0,.18);
       }
@@ -1134,39 +1225,43 @@
       .rcpi-shell-right { right: 0; border-left: 1px solid #cdd5dc; }
       .rcpi-shell-hd {
         display: flex; align-items: center; gap: 6px;
-        padding: 8px 10px; background: #002d72; color: #fff; flex: 0 0 auto;
+        padding: 11px 12px; background: #002d72; color: #fff; flex: 0 0 auto;
+        user-select: none;
       }
-      .rcpi-shell-title { font-weight: 700; flex: 1; }
+      .rcpi-shell-title { font-weight: 700; flex: 1; font-size: 15px; }
       .rcpi-shell-badges { font-size: 11px; }
       .rcpi-shell-min {
-        background: transparent; border: 0; color: #fff; cursor: pointer;
-        font-size: 15px; padding: 2px 6px;
+        background: none; border: none; color: #fff; cursor: pointer;
+        font-size: 18px; padding: 0 4px; line-height: 1;
       }
       .rcpi-shell-min:hover { opacity: .8; }
-      .rcpi-shell-tabs { display: flex; flex-wrap: wrap; gap: 2px; padding: 6px 6px 0; flex: 0 0 auto; }
-      .rcpi-shell-tab {
-        border: 1px solid #cdd5dc; border-bottom: 0; background: #e4e9ee;
-        border-radius: 4px 4px 0 0; padding: 5px 9px; cursor: pointer;
-        font-size: 12px; color: #33434f;
+      .rcpi-shell-tabs {
+        display: flex; border-bottom: 1px solid #dee2e6; background: #f8f9fa; flex: 0 0 auto;
       }
-      .rcpi-shell-tab.active { background: #f4f6f8; font-weight: 700; color: #002d72; }
-      .rcpi-shell-panels { overflow-y: auto; flex: 1; padding: 10px; }
-      .rcpi-shell-tabpanel { display: none; }
+      .rcpi-shell-tab {
+        flex: 1; padding: 8px 6px; border: none; border-bottom: 2px solid transparent;
+        background: none; cursor: pointer; font-size: 13px; color: #6e7477;
+      }
+      .rcpi-shell-tab.active { color: #002d72; border-bottom-color: #002d72; font-weight: 700; }
+      .rcpi-shell-panels { overflow-y: auto; flex: 1; }
+      .rcpi-shell-tabpanel { display: none; padding: 8px 10px; }
       .rcpi-shell-tabpanel.active { display: block; }
       .rcpi-shell-resize {
         position: absolute; top: 0; bottom: 0; width: 6px; cursor: ew-resize;
       }
       .rcpi-shell-left  .rcpi-shell-resize { right: -3px; }
       .rcpi-shell-right .rcpi-shell-resize { left: -3px; }
+      .rcpi-shell-resize:hover { background: rgba(0,45,114,.25); }
       .rcpi-shell-minbar {
-        position: fixed; top: 0; bottom: 0; width: 30px; z-index: 2000000;
+        position: fixed; top: 0; bottom: 0; width: 26px; z-index: 2000000;
         background: #002d72; color: #fff; cursor: pointer;
         display: flex; align-items: center; justify-content: center;
+        box-shadow: 2px 0 12px rgba(0,0,0,.2);
       }
       .rcpi-shell-minbar-left  { left: 0; }
       .rcpi-shell-minbar-right { right: 0; }
       .rcpi-shell-minbar:hover { background: #0040a0; }
-      .rcpi-shell-minbar span { writing-mode: vertical-rl; transform: rotate(180deg); font-weight: 700; letter-spacing: 1px; font-size: 12px; }
+      .rcpi-shell-minbar span { writing-mode: vertical-rl; transform: rotate(180deg); font-weight: 700; letter-spacing: .04em; font-size: 13px; }
       .rcpi-toast {
         position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%) translateY(10px);
         background: #1b2733; color: #fff; padding: 8px 14px; border-radius: 6px;
@@ -1204,7 +1299,7 @@
 
     // citations
     DOI_RE, PMID_RE, DOI_YEAR_RE, extractYear, endsWithRefMarker,
-    extractRawDoi, hasDoi, extractRawPmid, extractRawPmcid, collectPmids, hasPmidLink,
+    extractRawDoi, hasDoi, extractRawPmid, extractRawPmcid, collectPmids, hasPmidLink, hasPmcidLink,
     findReferencesContainer, collectReferenceEls, collectShortReferenceCandidates, refQueryText,
     crossrefQueryCached, fmtCrossref, scoreBand, ncbiSummary,
 

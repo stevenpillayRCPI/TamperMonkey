@@ -265,31 +265,30 @@
       if (!refs.length && !shortRefs.length) { listEl.innerHTML = '<div class="rcpi-empty">No reference-list entries detected.</div>'; return; }
 
       for (const el of refs) {
-        const hasDoi = S.hasDoi(el);
+        // Already fully identified by any citation id — nothing to flag.
+        if (S.hasDoi(el) || S.hasPmidLink(el) || S.hasPmcidLink(el)) continue;
+
         const rawDoi = S.extractRawDoi(el);
         const pmids = S.collectPmids(el);
-        const hasPmidLink = S.hasPmidLink(el);
 
         const row = uiMountDoc.createElement('div');
         row.className = 'rcpi-row';
         const text = (el.textContent || '').trim().slice(0, 90);
         let statusHtml = '';
 
-        if (hasDoi) {
-          statusHtml = '<span class="rcpi-badge ok">DOI linked</span>';
-        } else if (rawDoi) {
+        if (rawDoi) {
           statusHtml = `<span class="rcpi-badge warn">DOI present as plain text</span> <a href="https://doi.org/${S.escapeHtml(rawDoi)}" target="_blank" rel="noopener">${S.escapeHtml(rawDoi)}</a>`;
         } else {
           statusHtml = '<span class="rcpi-badge err">No DOI found</span> <span class="rcpi-checking">looking up…</span>';
         }
-        if (pmids.length && !hasPmidLink) statusHtml += ` <span class="rcpi-badge warn">PMID ${S.escapeHtml(pmids[0])} unlinked</span>`;
+        if (pmids.length) statusHtml += ` <span class="rcpi-badge warn">PMID ${S.escapeHtml(pmids[0])} unlinked</span>`;
 
         row.innerHTML = `<div class="rcpi-row-main"><span class="rcpi-msg">${S.escapeHtml(text)}…<br>${statusHtml}</span></div>
           <button class="rcpi-locate-btn">Locate</button>`;
         row.querySelector('.rcpi-locate-btn').addEventListener('click', () => S.locateInPage(el));
         listEl.appendChild(row);
 
-        if (!hasDoi && !rawDoi) {
+        if (!rawDoi) {
           const q = S.refQueryText(el);
           S.crossrefQueryCached(q).then(items => {
             const checkingEl = row.querySelector('.rcpi-checking');
@@ -456,6 +455,7 @@
       title: '🔍 Audit Toolkit',
       minIcon: '⟩',
       width: 400,
+      defaultMinimized: true,
       tabs
     });
 
@@ -478,37 +478,51 @@
     if (doc.getElementById('rcpi-audit-css')) return;
     const s = doc.createElement('style');
     s.id = 'rcpi-audit-css';
+    // Same button/spacing/colour tokens as the Edit Toolkit's .bb-btn family
+    // (own class names to avoid any risk of colliding with bb- classes if
+    // both scripts are ever present in the same top document).
     s.textContent = `
-      .rcpi-tab-toolbar { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
-      .rcpi-btn { background: #002d72; color: #fff; border: 0; border-radius: 4px; padding: 6px 10px; cursor: pointer; font-size: 12px; }
+      .rcpi-tab-toolbar { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+      .rcpi-btn {
+        padding: 3px 8px; border-radius: 4px; border: 1px solid;
+        cursor: pointer; font-size: 11px; white-space: nowrap;
+        background: #002d72; color: #fff; border-color: #002d72;
+      }
       .rcpi-btn:hover { background: #0040a0; }
-      .rcpi-btn.sec { background: #e4e9ee; color: #33434f; }
-      .rcpi-btn.sec:hover { background: #d3dae1; }
-      .rcpi-btn.danger { background: #b3261e; }
+      .rcpi-btn.sec { background: #fff; color: #6e7477; border-color: #cdd5dc; }
+      .rcpi-btn.sec:hover { background: #f8f9fa; }
+      .rcpi-btn.danger { background: #dc3545; border-color: #dc3545; }
       .rcpi-sum-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
       .rcpi-badge { border-radius: 10px; padding: 2px 8px; font-size: 11px; font-weight: 700; color: #fff; }
-      .rcpi-badge.err { background: #b3261e; }
-      .rcpi-badge.warn { background: #b46a00; }
+      .rcpi-badge.err { background: #dc3545; }
+      .rcpi-badge.warn { background: #fd7e14; }
       .rcpi-badge.info { background: #33607a; }
-      .rcpi-badge.ok { background: #1e7a34; }
-      .rcpi-muted { color: #667; font-size: 11px; }
-      .rcpi-sec-title { font-weight: 700; margin: 10px 0 4px; font-size: 12px; color: #33434f; }
-      .rcpi-empty { color: #889; font-size: 12px; padding: 6px 0; }
-      .rcpi-row { display: flex; align-items: flex-start; gap: 8px; background: #fff; border: 1px solid #dfe4e8; border-radius: 4px; padding: 7px 9px; margin-bottom: 6px; }
+      .rcpi-badge.ok { background: #198754; }
+      .rcpi-muted { color: #6e7477; font-size: 11px; }
+      .rcpi-sec-title { font-weight: 700; margin: 14px 0 4px; padding-top: 10px; border-top: 1px solid #e5e9f0; font-size: 13px; color: #002d72; }
+      .rcpi-sec-title:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+      .rcpi-empty { color: #6e7477; font-size: 12px; padding: 6px 0; }
+      .rcpi-row {
+        display: flex; align-items: flex-start; gap: 6px;
+        padding: 4px 2px; border-bottom: 1px solid #f1f5fb; font-size: 12px;
+      }
       .rcpi-row-main { flex: 1; min-width: 0; }
-      .rcpi-sev-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
-      .rcpi-sev-error .rcpi-sev-dot, .rcpi-sev-err .rcpi-sev-dot { background: #b3261e; }
-      .rcpi-sev-warn .rcpi-sev-dot { background: #b46a00; }
-      .rcpi-sev-info .rcpi-sev-dot { background: #33607a; }
-      .rcpi-cat { font-weight: 700; font-size: 11px; color: #556; margin-right: 4px; }
-      .rcpi-msg { font-size: 12px; color: #1b2733; word-break: break-word; }
-      .rcpi-locate-btn { flex: 0 0 auto; background: #eef2f6; border: 1px solid #cdd5dc; border-radius: 4px; padding: 3px 8px; font-size: 11px; cursor: pointer; }
-      .rcpi-locate-btn:hover { background: #dde5ec; }
+      .rcpi-sev-dot { display: none; } /* colour now carried by rcpi-cat text colour, matches .bb-audit-icon */
+      .rcpi-sev-error .rcpi-cat, .rcpi-sev-err .rcpi-cat { color: #dc3545; }
+      .rcpi-sev-warn  .rcpi-cat { color: #fd7e14; }
+      .rcpi-sev-info  .rcpi-cat { color: #33607a; }
+      .rcpi-cat { font-weight: 700; font-size: 11px; margin-right: 4px; }
+      .rcpi-msg { font-size: 13px; color: #1b2733; word-break: break-word; }
+      .rcpi-locate-btn {
+        flex: 0 0 auto; background: #fff; border: 1px solid #cdd5dc; color: #6e7477;
+        border-radius: 4px; padding: 3px 8px; font-size: 11px; cursor: pointer;
+      }
+      .rcpi-locate-btn:hover { background: #f8f9fa; }
       .rcpi-locate-btn:disabled { opacity: .4; cursor: default; }
-      .rcpi-progress { font-size: 12px; color: #556; margin-bottom: 6px; }
-      .rcpi-set-row { display: block; font-size: 12px; margin-bottom: 8px; }
-      .rcpi-textarea { width: 100%; box-sizing: border-box; font: 12px monospace; }
-      .rcpi-checking { color: #889; font-style: italic; }
+      .rcpi-progress { font-size: 12px; color: #6e7477; margin-bottom: 6px; }
+      .rcpi-set-row { display: block; font-size: 13px; margin-bottom: 8px; }
+      .rcpi-textarea { width: 100%; box-sizing: border-box; font: 12px monospace; border: 1px solid #cdd5dc; border-radius: 4px; padding: 6px; }
+      .rcpi-checking { color: #6e7477; font-style: italic; }
     `;
     doc.head.appendChild(s);
   }

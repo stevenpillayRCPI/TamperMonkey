@@ -246,7 +246,7 @@
   function copyAsText(text) {
     // Plain-text copy — for HTML source view paste
     navigator.clipboard.writeText(text).catch(err => {
-      console.warn('[BB Toolkit] clipboard.writeText failed', err);
+      console.warn('[Edit Toolkit] clipboard.writeText failed', err);
     });
   }
 
@@ -290,7 +290,7 @@
   function waitForTinyMCE(callback, attempts = 0) {
     if (attempts > 80) {
       // Give up waiting but still build the panel — shows "editor not found"
-      console.warn('[BB Toolkit] TinyMCE not found after 40s — building panel anyway');
+      console.warn('[Edit Toolkit] TinyMCE not found after 40s — building panel anyway');
       callback();
       return;
     }
@@ -505,7 +505,7 @@
     }
 
     // 8. Table accessibility: missing <caption>; header row not using
-    // <th scope="col">.
+    // <th scope="col">; first-column row headers not using <th scope="row">.
     body.querySelectorAll('table').forEach(tbl => {
       if (!tbl.querySelector('caption')) {
         fixes.push({
@@ -541,6 +541,28 @@
             id: fid(), category: 'Accessibility',
             label: 'Table header cells missing scope → add scope="col"',
             apply: () => { firstRow.querySelectorAll('th:not([scope])').forEach(th => th.setAttribute('scope', 'col')); }
+          });
+        }
+      }
+
+      // Row-header pattern: every row's first cell is a <th> (common for
+      // "spec sheet" style tables where the left column labels each row).
+      // Handles the common single-header-column case automatically; a
+      // table mixing both a header row AND a header column, or with
+      // multi-level/spanning headers, is genuinely ambiguous and is left
+      // for manual review rather than guessed at.
+      const rows = [...tbl.querySelectorAll('tr')];
+      if (rows.length > 1) {
+        const allFirstCellsAreTh = rows.every(tr => tr.firstElementChild && tr.firstElementChild.tagName === 'TH');
+        const bodyRows = rows.slice(firstRow && firstRow.querySelectorAll('th').length ? 1 : 0); // skip an already-handled header row
+        const rowHeaderThsNoScope = bodyRows
+          .map(tr => tr.firstElementChild)
+          .filter(th => th && th.tagName === 'TH' && !th.getAttribute('scope'));
+        if (allFirstCellsAreTh && rowHeaderThsNoScope.length) {
+          fixes.push({
+            id: fid(), category: 'Accessibility',
+            label: `Row-header table: ${rowHeaderThsNoScope.length} first-column <th> missing scope → add scope="row"`,
+            apply: () => { rowHeaderThsNoScope.forEach(th => th.setAttribute('scope', 'row')); }
           });
         }
       }
@@ -620,6 +642,11 @@
       try {
         const a11y = S.runA11y(body);
         a11y.issues.forEach(is => {
+          // Tables: this section's own check #8 (above) already owns
+          // caption + scope handling with table-aware context (which row
+          // is the header row, etc.) that the shared engine can't see —
+          // skip here so the same table doesn't get flagged twice.
+          if (is.category === 'Tables') return;
           if (!is.el) { if (is.severity !== 'info') reviews.push({ category: is.category, el: null, label: is.msg }); return; }
           if (is.fix === 'add-empty-alt') {
             fixes.push({ id: fid(), category: 'Accessibility', label: `Decorative image → alt="" — "${is.msg.slice(0, 40)}"`,
@@ -627,11 +654,15 @@
           } else if (is.fix === 'b-to-strong') {
             fixes.push({ id: fid(), category: 'Semantics', label: `<b> → <strong>: "${is.el.textContent.trim().slice(0, 30)}"`,
               apply: () => { const r = tinyDoc.createElement('strong'); for (const a of Array.from(is.el.attributes)) r.setAttribute(a.name, a.value); while (is.el.firstChild) r.appendChild(is.el.firstChild); is.el.replaceWith(r); } });
-          } else if (is.fix === 'i-to-em') {
-            fixes.push({ id: fid(), category: 'Semantics', label: `<i> → <em>: "${is.el.textContent.trim().slice(0, 30)}"`,
-              apply: () => { const r = tinyDoc.createElement('em'); for (const a of Array.from(is.el.attributes)) r.setAttribute(a.name, a.value); while (is.el.firstChild) r.appendChild(is.el.firstChild); is.el.replaceWith(r); } });
           } else if (is.fix === 'remove-empty') {
             fixes.push({ id: fid(), category: 'Hygiene', label: 'Remove empty paragraph (paste artefact)', apply: () => is.el.remove() });
+          } else if (is.fix === 'add-new-window-note') {
+            // The visible new-tab icon on these links isn't itself
+            // accessible text — a screen reader announces nothing extra
+            // for it. Adds a visually-hidden note so the warning is heard
+            // without changing what's visually on the page.
+            fixes.push({ id: fid(), category: 'Links', label: `Add "(opens in a new tab)" note: "${is.el.textContent.trim().slice(0, 30)}"`,
+              apply: () => { const span = tinyDoc.createElement('span'); span.className = 'visually-hidden'; span.textContent = ' (opens in a new tab)'; is.el.appendChild(span); } });
           } else if (is.severity !== 'info') {
             // No safe auto-fix — surface for human review, same bucket as
             // the existing image-alt review flags above.
@@ -640,6 +671,27 @@
         });
       } catch (e) { dbg('shared a11y scan failed', e); }
     }
+
+    // 15. Reveal items must stay expanded (.collapse.show) while editing.
+    // Only the runtime cleanup script (bootstrap-custom-cleanup.js,
+    // initRevealBaseline/enforceCollapsedBaseline) is meant to collapse
+    // these — for view-mode learners. Inside the editor they should always
+    // be visibly open; a panel missing either class means the author sees
+    // it closed/hidden and may not realise there's content underneath.
+    body.querySelectorAll('.reveal-item').forEach(item => {
+      const panel = item.querySelector(':scope > div[id^="reveal-"]') || item.querySelector(':scope > div.collapse') || item.querySelector(':scope > div');
+      if (!panel) return;
+      const missingCollapse = !panel.classList.contains('collapse');
+      const missingShow = !panel.classList.contains('show');
+      if (missingCollapse || missingShow) {
+        const missing = [missingCollapse && '"collapse"', missingShow && '"show"'].filter(Boolean).join(' and ');
+        fixes.push({
+          id: fid(), category: 'Structure',
+          label: `Reveal item panel missing ${missing} class → expand it for editing`,
+          apply: () => { panel.classList.add('collapse', 'show'); }
+        });
+      }
+    });
 
     // Expansion point: anything registered via RCPIShared.registerFixCheck()
     // elsewhere gets merged in here automatically — add new fixes without
@@ -1212,7 +1264,7 @@
     panel.id = 'bb-toolkit-panel';
     panel.innerHTML = `
       <div id="bb-tk-header">
-        <span id="bb-tk-title">🧱 BB Toolkit</span>
+        <span id="bb-tk-title">🧱 Edit Toolkit</span>
         <span id="bb-tk-badges"></span>
         <button id="bb-tk-min" title="Minimise to a bar">⟨</button>
       </div>
@@ -1275,7 +1327,7 @@
     if (!minBar) {
       minBar = document.createElement('div');
       minBar.id = 'bb-tk-minbar';
-      minBar.title = 'Open BB Toolkit';
+      minBar.title = 'Open Edit Toolkit';
       minBar.innerHTML = '<span>🧱 BB&nbsp;Toolkit</span>';
       minBar.style.display = 'none';
       minBar.addEventListener('click', () => setMinimized(false));
@@ -1453,7 +1505,7 @@
               copyToClipboard(row);
               toast('✓ Copied (+1 item). If the row wrapper is missing on paste, the editor API was unavailable — see console.', 'warn');
             } catch (err) {
-              console.error('[BB Toolkit] +1 failed', err);
+              console.error('[Edit Toolkit] +1 failed', err);
               toast('Could not add item — see console', 'error');
             }
           });
@@ -5850,11 +5902,14 @@ function addParagraphToRow(rowEl) {
     listEl.innerHTML = '';
     if (!refs.length) { listEl.innerHTML = '<span style="color:#888;">No reference-list entries detected.</span>'; return; }
 
-    refs.forEach(el => {
-      const hasDoi = S.hasDoi(el);
+    // Skip anything already fully identified by any citation id — nothing
+    // to do here, matches the same rule in the Audit Toolkit's report.
+    const pending = refs.filter(el => !(S.hasDoi(el) || S.hasPmidLink(el) || S.hasPmcidLink(el)));
+    if (!pending.length) { listEl.innerHTML = '<span style="color:#888;">All references already have a linked DOI, PMID, or PMCID.</span>'; return; }
+
+    pending.forEach(el => {
       const rawDoi = S.extractRawDoi(el);
       const pmids = S.collectPmids(el);
-      const hasPmidLink = S.hasPmidLink(el);
       const text = (el.textContent || '').trim().slice(0, 90);
 
       const row = document.createElement('div');
@@ -5862,8 +5917,6 @@ function addParagraphToRow(rowEl) {
       row.innerHTML = `<div style="flex:1;">${escapeHtml(text)}…<div class="bb-cite-status" style="font-size:11px;color:#888;">checking…</div></div>`;
       listEl.appendChild(row);
       const statusEl = row.querySelector('.bb-cite-status');
-
-      if (hasDoi) { statusEl.textContent = 'DOI already linked'; return; }
 
       if (rawDoi) {
         statusEl.innerHTML = `Raw DOI "${escapeHtml(rawDoi)}" found — `;
@@ -5883,25 +5936,35 @@ function addParagraphToRow(rowEl) {
           const band = S.scoreBand(best.score || 0, yearMismatch);
           statusEl.innerHTML = `${escapeHtml(band.label)}: ${escapeHtml(S.fmtCrossref(best))} — `;
           const btn = document.createElement('button');
-          btn.className = 'bb-btn bb-btn-plus'; btn.style.cssText = 'padding:2px 8px;font-size:11px;'; btn.textContent = 'Insert & link DOI';
-          btn.addEventListener('click', () => {
-            const doi = best.DOI;
-            if (!doi) return;
-            const didWrite = tinyWrite(() => {
-              const space = tinyDoc.createTextNode(' ');
-              const a = tinyDoc.createElement('a');
-              a.setAttribute('href', 'https://doi.org/' + doi);
-              a.setAttribute('target', '_blank'); a.setAttribute('rel', 'noopener noreferrer');
-              a.textContent = doi;
-              el.appendChild(space); el.appendChild(a);
-            }, 'insert doi link', { ungated: true });
-            if (didWrite) { toast('✓ DOI inserted and linked', 'success'); statusEl.textContent = 'Linked.'; btn.remove(); }
-          });
+          btn.style.cssText = 'padding:2px 8px;font-size:11px;';
+          if (band.cls === 'doi-low') {
+            // Low confidence — don't offer a one-click insert; make the
+            // author look at the actual Crossref record before deciding.
+            btn.className = 'bb-btn bb-btn-goto';
+            btn.textContent = 'Open to verify';
+            btn.addEventListener('click', () => window.open(`https://doi.org/${best.DOI || ''}`, '_blank'));
+          } else {
+            btn.className = 'bb-btn bb-btn-plus';
+            btn.textContent = 'Insert & link DOI';
+            btn.addEventListener('click', () => {
+              const doi = best.DOI;
+              if (!doi) return;
+              const didWrite = tinyWrite(() => {
+                const space = tinyDoc.createTextNode(' ');
+                const a = tinyDoc.createElement('a');
+                a.setAttribute('href', 'https://doi.org/' + doi);
+                a.setAttribute('target', '_blank'); a.setAttribute('rel', 'noopener noreferrer');
+                a.textContent = doi;
+                el.appendChild(space); el.appendChild(a);
+              }, 'insert doi link', { ungated: true });
+              if (didWrite) { toast('✓ DOI inserted and linked', 'success'); statusEl.textContent = 'Linked.'; btn.remove(); }
+            });
+          }
           statusEl.appendChild(btn);
         });
       }
 
-      if (pmids.length && !hasPmidLink) {
+      if (pmids.length) {
         const pmidBtn = document.createElement('button');
         pmidBtn.className = 'bb-btn bb-btn-plus'; pmidBtn.style.cssText = 'padding:2px 8px;font-size:11px;margin-left:6px;'; pmidBtn.textContent = `Link PMID ${pmids[0]}`;
         pmidBtn.addEventListener('click', () => {
