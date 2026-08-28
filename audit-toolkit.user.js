@@ -3,7 +3,7 @@
 // @namespace    rcpi-content-audit
 // @description  View-mode content audit: WCAG a11y report, broken link/image checker, URL lint, DOI/PMID citation report, copyright/H5P image audit. Read-only — this script never writes to page or editor content; see the Edit Toolkit for fixes.
 // @match        https://brightspace.rcpi.ie/*
-// @version      4.5
+// @version      4.6
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/audit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/audit-toolkit.user.js
@@ -63,15 +63,19 @@
   }
   function normalizeHtml(html) { return html.replace(/\s+/g, ' ').trim(); }
 
-  // D2L's Next-page control lives in the top document, inside the shadow
-  // root of <d2l-activity-navigation-iterators>, and is itself a component
-  // with its own declarative shadow root wrapping the real <button> — two
-  // shadow hops to reach a clickable node. Confirmed via devtools; this is
-  // NOT present on /edit/ pages, so only wired into the (view-mode) Audit
-  // Toolkit.
+  // D2L's Next-page control lives inside the same-origin smart-curriculum
+  // iframe (nested in the top document), inside the shadow root of
+  // <d2l-activity-navigation-iterators>, which is itself a component with
+  // its own declarative shadow root wrapping the real <button> — an iframe
+  // hop plus two shadow hops to reach a clickable node. Confirmed via
+  // devtools; this is NOT present on /edit/ pages, so only wired into the
+  // (view-mode) Audit Toolkit.
   function clickNextPageButton() {
     try {
-      const host = uiMountDoc.querySelector('d2l-activity-navigation-iterators');
+      const curriculumFrame = Array.from(uiMountDoc.querySelectorAll('iframe'))
+        .find(f => /smart-curriculum/i.test(f.getAttribute('src') || ''));
+      const frameDoc = curriculumFrame && curriculumFrame.contentDocument;
+      const host = frameDoc && frameDoc.querySelector('d2l-activity-navigation-iterators');
       const navBtn = host && host.shadowRoot && host.shadowRoot.getElementById('iteratorButtonNext');
       if (!navBtn) { S.toast('Next-page button not found on this page', uiMountDoc); return false; }
       const inner = navBtn.shadowRoot && navBtn.shadowRoot.querySelector('button');
