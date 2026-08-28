@@ -3,7 +3,7 @@
 // @namespace    rcpi-content-audit
 // @description  View-mode content audit: WCAG a11y report, broken link/image checker, URL lint, DOI/PMID citation report, copyright/H5P image audit. Read-only — this script never writes to page or editor content; see the Edit Toolkit for fixes.
 // @match        https://brightspace.rcpi.ie/*
-// @version      4.2
+// @version      4.5
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/audit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/audit-toolkit.user.js
@@ -62,6 +62,28 @@
     return text.split(/\r?\n---\r?\n/).map(s => s.trim()).filter(Boolean);
   }
   function normalizeHtml(html) { return html.replace(/\s+/g, ' ').trim(); }
+
+  // D2L's Next-page control lives in the top document, inside the shadow
+  // root of <d2l-activity-navigation-iterators>, and is itself a component
+  // with its own declarative shadow root wrapping the real <button> — two
+  // shadow hops to reach a clickable node. Confirmed via devtools; this is
+  // NOT present on /edit/ pages, so only wired into the (view-mode) Audit
+  // Toolkit.
+  function clickNextPageButton() {
+    try {
+      const host = uiMountDoc.querySelector('d2l-activity-navigation-iterators');
+      const navBtn = host && host.shadowRoot && host.shadowRoot.getElementById('iteratorButtonNext');
+      if (!navBtn) { S.toast('Next-page button not found on this page', uiMountDoc); return false; }
+      const inner = navBtn.shadowRoot && navBtn.shadowRoot.querySelector('button');
+      const clickTarget = inner || navBtn;
+      if (clickTarget.disabled || navBtn.getAttribute('aria-disabled') === 'true') {
+        S.toast('Already on the last page', uiMountDoc);
+        return false;
+      }
+      clickTarget.click();
+      return true;
+    } catch (e) { S.toast('Could not click next page', uiMountDoc); return false; }
+  }
 
   // For each snippet, find matching elements (assumes a clean copy of an
   // element's outerHTML) and keep only the most specific (deepest) match —
@@ -470,6 +492,7 @@
       <div class="rcpi-tab-toolbar" style="margin-top:8px;">
         <button class="rcpi-btn" data-run>Find &amp; Locate</button>
         <button class="rcpi-btn sec" data-save>Save snippets</button>
+        <button class="rcpi-btn sec" data-next-page>Next page →</button>
       </div>
       <div class="rcpi-progress" data-status></div>
       <div class="rcpi-tab-toolbar" data-stepper style="display:none;">
@@ -526,6 +549,12 @@
     bodyEl.querySelector('[data-run]').addEventListener('click', run);
     bodyEl.querySelector('[data-prev]').addEventListener('click', () => goTo(cursor - 1));
     bodyEl.querySelector('[data-next]').addEventListener('click', () => goTo(cursor + 1));
+    bodyEl.querySelector('[data-next-page]').addEventListener('click', () => {
+      // Page nav is a real D2L navigation, not SPA-in-place — the panel
+      // re-mounts fresh on the new page (Locate tab restored via the
+      // shared shell's tab-persistence), so no re-run needed here.
+      clickNextPageButton();
+    });
   }
 
   // ─── SHELL / FAB BADGE ────────────────────────────────────────────────

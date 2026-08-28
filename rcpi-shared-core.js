@@ -1122,6 +1122,7 @@
     const tabs = opts.tabs || [];
     const MIN_KEY = `${P}-minimized`;
     const W_KEY = `${P}-width`;
+    const TAB_KEY = `${P}-active-tab`;
 
     injectShellCss(doc);
 
@@ -1151,15 +1152,23 @@
     const panelsEl = panel.querySelector('.rcpi-shell-panels');
     const rendered = {};
 
+    // Restore whichever tab was open before the last page navigation
+    // (panel re-mounts fresh on every SPA nav — see removal above), so
+    // e.g. Audit Toolkit's Locate tab doesn't reset to tab 1 every time.
+    let startId = null;
+    try { startId = _GMget(TAB_KEY, null); } catch {}
+    let startIdx = tabs.findIndex(t => t.id === startId);
+    if (startIdx < 0) startIdx = 0;
+
     tabs.forEach((t, idx) => {
       const btn = doc.createElement('button');
-      btn.className = 'rcpi-shell-tab' + (idx === 0 ? ' active' : '');
+      btn.className = 'rcpi-shell-tab' + (idx === startIdx ? ' active' : '');
       btn.textContent = t.label;
       btn.dataset.tab = t.id;
       tabsEl.appendChild(btn);
 
       const body = doc.createElement('div');
-      body.className = 'rcpi-shell-tabpanel' + (idx === 0 ? ' active' : '');
+      body.className = 'rcpi-shell-tabpanel' + (idx === startIdx ? ' active' : '');
       body.id = `${P}-tab-${t.id}`;
       panelsEl.appendChild(body);
 
@@ -1168,6 +1177,7 @@
         panelsEl.querySelectorAll('.rcpi-shell-tabpanel').forEach(p => p.classList.remove('active'));
         btn.classList.add('active');
         body.classList.add('active');
+        try { _GMset(TAB_KEY, t.id); } catch {}
         // Render on first visit only. Re-invoking render() on every click
         // is exactly what caused Links/Citations to silently re-run their
         // network probes each time the tab was revisited — a tab's own
@@ -1177,8 +1187,9 @@
       });
     });
 
-    // Render the first tab immediately.
-    if (tabs[0] && tabs[0].render) { try { tabs[0].render(panelsEl.querySelector(`#${P}-tab-${tabs[0].id}`)); rendered[tabs[0].id] = true; } catch (e) {} }
+    // Render the persisted (or first) tab immediately.
+    const startTab = tabs[startIdx];
+    if (startTab && startTab.render) { try { startTab.render(panelsEl.querySelector(`#${P}-tab-${startTab.id}`)); rendered[startTab.id] = true; } catch (e) {} }
 
     // Minimised bar.
     const minbar = doc.createElement('div');
