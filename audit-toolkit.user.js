@@ -3,7 +3,7 @@
 // @namespace    rcpi-content-audit
 // @description  View-mode content audit: WCAG a11y report, broken link/image checker, URL lint, DOI/PMID citation report, copyright/H5P image audit. Read-only — this script never writes to page or editor content; see the Edit Toolkit for fixes.
 // @match        https://brightspace.rcpi.ie/*
-// @version      4.7
+// @version      4.8
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/audit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/audit-toolkit.user.js
@@ -32,11 +32,13 @@
   // unconfirmed, so both are matched here. If the bar doesn't appear on a
   // unit page, check what the content iframe's own URL looks like there
   // and extend this pattern.
-  const IS_VIEW_PATH = /\/content\/enforced\/.*\.html/i.test(location.pathname)
-    || /\/d2l\/le\/lessons\/\d+\/folders\/\d+/i.test(location.pathname)
-    || /\/d2l\/le\/lessons\/\d+\/lessons\/\d+/i.test(location.pathname)
-    || /\/d2l\/le\/lessons\/\d+\/units\/\d+/i.test(location.pathname);
-  if (!IS_VIEW_PATH) return;
+  function computeIsViewPath() {
+    return /\/content\/enforced\/.*\.html/i.test(location.pathname)
+      || /\/d2l\/le\/lessons\/\d+\/folders\/\d+/i.test(location.pathname)
+      || /\/d2l\/le\/lessons\/\d+\/lessons\/\d+/i.test(location.pathname)
+      || /\/d2l\/le\/lessons\/\d+\/units\/\d+/i.test(location.pathname);
+  }
+  if (!computeIsViewPath()) return;
 
   // ─── FEATURES / SETTINGS ────────────────────────────────────────────
   const SETTINGS_KEY = 'rcpi-audit-settings-v1';
@@ -564,6 +566,7 @@
 
   // ─── SHELL / FAB BADGE ────────────────────────────────────────────────
   let shell = null;
+  let keydownHandler = null;
   function updateFabBadge() {
     if (!shell) return;
     const errs = a11yResult ? a11yResult.issues.filter(i => i.severity === 'error').length : 0;
@@ -604,9 +607,11 @@
       } catch (e) {}
     }, 1000);
 
-    uiMountDoc.addEventListener('keydown', (e) => {
+    if (keydownHandler) uiMountDoc.removeEventListener('keydown', keydownHandler);
+    keydownHandler = (e) => {
       if (e.altKey && e.shiftKey && e.key.toLowerCase() === 'e') shell.setMinimized(false);
-    });
+    };
+    uiMountDoc.addEventListener('keydown', keydownHandler);
   }
 
   function injectAuditCss(doc) {
@@ -662,6 +667,22 @@
     `;
     doc.head.appendChild(s);
   }
+
+  // Unit pages "mostly work" because they tend to be reached via a real
+  // navigation (reload/URL bar); lesson and folder pages are reached via
+  // D2L's client-side routing between content types, which changes
+  // location.pathname without a document load — Tampermonkey never
+  // re-runs the script, so the panel and its captured references go
+  // stale. Poll for a pathname change and remount instead of relying on
+  // a full reload.
+  let lastPath = location.pathname;
+  setInterval(() => {
+    if (location.pathname === lastPath) return;
+    lastPath = location.pathname;
+    if (computeIsViewPath()) {
+      try { mount(); } catch (e) { console.error('[rcpi-audit] remount on nav failed', e); }
+    }
+  }, 800);
 
   mount();
 })();
