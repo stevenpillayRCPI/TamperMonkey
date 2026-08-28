@@ -3,7 +3,7 @@
 // @namespace    rcpi-content-audit
 // @description  View-mode content audit: WCAG a11y report, broken link/image checker, URL lint, DOI/PMID citation report, copyright/H5P image audit. Read-only — this script never writes to page or editor content; see the Edit Toolkit for fixes.
 // @match        https://brightspace.rcpi.ie/*
-// @version      4.6
+// @version      4.7
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/audit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/audit-toolkit.user.js
@@ -34,6 +34,7 @@
   // and extend this pattern.
   const IS_VIEW_PATH = /\/content\/enforced\/.*\.html/i.test(location.pathname)
     || /\/d2l\/le\/lessons\/\d+\/folders\/\d+/i.test(location.pathname)
+    || /\/d2l\/le\/lessons\/\d+\/lessons\/\d+/i.test(location.pathname)
     || /\/d2l\/le\/lessons\/\d+\/units\/\d+/i.test(location.pathname);
   if (!IS_VIEW_PATH) return;
 

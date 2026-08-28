@@ -5,7 +5,7 @@
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      4.6
+// @version      4.7
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -1304,11 +1304,11 @@
             <p class="bb-hint">Components on this page. <b>⟳ +1</b> adds an item directly into the live component.<br>
             <b>Alt+right-click</b> in the editor for BB actions (plain right-click = normal TinyMCE menu):<br>
             <b>cell(s)</b> → table colours/structure · <b>selected text</b> → wrap / 2-columns · <b>component</b> → convert · <b>icon</b> → swap · <b>image</b> → figure/decorative · <b>link</b> → tracking/new-tab · <b>YouTube</b> → privacy · <b>PDF</b> → download link · <b>row</b> → colour / insert / PDF / snippet · <b>gap</b> → insert row.</p>
+            <button id="bb-tk-fix" class="bb-btn bb-btn-fix-primary">🔧 Check &amp; fix page issues</button>
             <button id="bb-tk-insert-row" class="bb-btn bb-btn-plus" style="margin:0 0 8px;">+ Insert row at cursor</button>
             <button id="bb-tk-outline" class="bb-btn bb-btn-goto" style="margin:0 0 8px;">🗂 Heading outline</button>
             <button id="bb-tk-replace" class="bb-btn bb-btn-goto" style="margin:0 0 8px;">🔎 Find &amp; replace</button>
             <button id="bb-tk-citations" class="bb-btn bb-btn-goto" style="margin:0 0 8px;">📎 Link DOI / PMID citations</button>
-            <button id="bb-tk-fix" class="bb-btn bb-btn-goto" style="margin:0 0 8px;">🔧 Check &amp; fix page issues</button>
             <button id="bb-tk-audit-launch" class="bb-btn bb-btn-goto" style="margin:0 0 8px;">🔍 Open Content Audit (view mode)</button>
             <div id="bb-tk-audit-banner" style="display:none;"></div>
             <div id="bb-tk-wordcount" class="bb-wordcount" title="Words / reading time in the editor content">—</div>
@@ -5413,6 +5413,12 @@ function addParagraphToRow(rowEl) {
       }
       .bb-btn-plus  { background: #002d72; color: #fff; border-color: #002d72; }
       .bb-btn-goto  { background: #fff; color: #6e7477; border-color: #cdd5dc; }
+      .bb-btn-fix-primary {
+        display: block; width: 100%; box-sizing: border-box;
+        padding: 9px 10px; margin: 0 0 10px; font-size: 13px; font-weight: 700;
+        background: #b3261e; color: #fff; border-color: #b3261e;
+      }
+      .bb-btn-fix-primary:hover { background: #921d17; border-color: #921d17; }
       .bb-btn-img   { background: #6f42c1; color: #fff; border-color: #6f42c1; font-size: 11px; }
       .bb-audit-row {
         display: flex; align-items: flex-start; gap: 6px;
