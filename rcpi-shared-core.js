@@ -197,8 +197,11 @@
     try {
       revealAncestors(el);
       el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      clearTimeout(el._rcpiLocateTimer);
+      el.classList.remove('rcpi-locate-flash');
+      void el.offsetWidth; // restart animation if already flashing
       el.classList.add('rcpi-locate-flash');
-      setTimeout(() => el.classList.remove('rcpi-locate-flash'), 2200);
+      el._rcpiLocateTimer = setTimeout(() => el.classList.remove('rcpi-locate-flash'), 2200);
     } catch (e) {}
   }
 
@@ -541,7 +544,10 @@
   // `fix` is an advisory hint only — this module never applies it.
   function runA11y(body) {
     const issues = [];
-    const note = (severity, category, el, msg, fix) => issues.push({ severity, category, el: el || null, msg, fix: fix || null });
+    const note = (severity, category, el, msg, fix) => {
+      if (el && el.closest && el.closest('.rcpi-shell')) return;
+      issues.push({ severity, category, el: el || null, msg, fix: fix || null });
+    };
 
     const altCounts = {};
     body.querySelectorAll('img[alt]').forEach(img => {
@@ -694,7 +700,10 @@
       }
     });
 
-    body.querySelectorAll('marquee, [style*="animation" i]').forEach(el => note('warn', 'Motion', el, 'Auto-playing animation with no visible pause control', null));
+    body.querySelectorAll('marquee, [style*="animation" i]').forEach(el => {
+      if (el.hasAttribute('data-bb-li-animated')) return; // scroll-triggered, one-shot li fade-in — not autoplaying motion
+      note('warn', 'Motion', el, 'Auto-playing animation with no visible pause control', null);
+    });
     body.querySelectorAll('video[autoplay], audio[autoplay]').forEach(el => { if (!el.hasAttribute('controls')) note('error', 'Media', el, 'Autoplaying media has no visible controls to pause/stop it', null); });
 
     if (body.ownerDocument) {
@@ -735,15 +744,9 @@
       else if (isEmptyish && /^H[1-6]$/.test(el.tagName)) note('error', 'Headings', el, `Empty ${el.tagName.toLowerCase()} heading`, null);
     });
 
-    body.querySelectorAll('p').forEach(el => {
-      const txt = el.textContent.trim();
-      if (!txt || txt.length > 120) return;
-      const child = el.children;
-      if (child.length === 1 && (child[0].tagName === 'STRONG' || child[0].tagName === 'B')) {
-        const innerTxt = child[0].textContent.trim();
-        if (innerTxt === txt && txt.length >= 3) note('warn', 'Headings', el, `Fake heading: short paragraph using only bold text "${txt.slice(0, 50)}" — use a proper <h2>/<h3> instead`, null);
-      }
-    });
+    // "Fake heading" check (bold-only short paragraph) removed — too
+    // prone to false positives (e.g. emphasised quotes/callouts that are
+    // legitimately bold, not mislabelled headings).
 
     body.querySelectorAll('a[href]').forEach(a => {
       const href = a.getAttribute('href') || '';
@@ -1269,7 +1272,15 @@
         z-index: 2100000; opacity: 0; transition: opacity .25s, transform .25s; pointer-events: none;
       }
       .rcpi-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
-      .rcpi-locate-flash { outline: 3px solid #ffb300 !important; outline-offset: 2px; transition: outline-color .3s; }
+      .rcpi-locate-flash {
+        outline: 3px solid #ffb300 !important;
+        outline-offset: 2px;
+        animation: rcpi-locate-pulse 2.2s ease-out;
+      }
+      @keyframes rcpi-locate-pulse {
+        0%, 40% { background-color: rgba(255,179,0,.35); box-shadow: 0 0 0 6px rgba(255,179,0,.25); }
+        100% { background-color: transparent; box-shadow: 0 0 0 6px rgba(255,179,0,0); }
+      }
     `;
     doc.head.appendChild(s);
   }
