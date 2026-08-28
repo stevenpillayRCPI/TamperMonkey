@@ -202,7 +202,7 @@
       void el.offsetWidth; // restart animation if already flashing
       el.classList.add('rcpi-locate-flash');
       el._rcpiLocateTimer = setTimeout(() => el.classList.remove('rcpi-locate-flash'), 2200);
-    } catch (e) {}
+    } catch (e) { console.error('[rcpi] locateInPage failed:', e); }
   }
 
   // ─── IGNORE-LIST / SESSION STORAGE ────────────────────────────────────
