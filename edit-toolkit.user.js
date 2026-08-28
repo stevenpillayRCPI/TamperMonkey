@@ -5,7 +5,7 @@
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      4.5
+// @version      4.4
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -1305,10 +1305,10 @@
             <b>Alt+right-click</b> in the editor for BB actions (plain right-click = normal TinyMCE menu):<br>
             <b>cell(s)</b> → table colours/structure · <b>selected text</b> → wrap / 2-columns · <b>component</b> → convert · <b>icon</b> → swap · <b>image</b> → figure/decorative · <b>link</b> → tracking/new-tab · <b>YouTube</b> → privacy · <b>PDF</b> → download link · <b>row</b> → colour / insert / PDF / snippet · <b>gap</b> → insert row.</p>
             <button id="bb-tk-insert-row" class="bb-btn bb-btn-plus" style="margin:0 0 8px;">+ Insert row at cursor</button>
-            <button id="bb-tk-fix" class="bb-btn bb-btn-goto" style="margin:0 0 8px;">🔧 Check &amp; fix page issues</button>
             <button id="bb-tk-outline" class="bb-btn bb-btn-goto" style="margin:0 0 8px;">🗂 Heading outline</button>
             <button id="bb-tk-replace" class="bb-btn bb-btn-goto" style="margin:0 0 8px;">🔎 Find &amp; replace</button>
             <button id="bb-tk-citations" class="bb-btn bb-btn-goto" style="margin:0 0 8px;">📎 Link DOI / PMID citations</button>
+            <button id="bb-tk-fix" class="bb-btn bb-btn-goto" style="margin:0 0 8px;">🔧 Check &amp; fix page issues</button>
             <button id="bb-tk-audit-launch" class="bb-btn bb-btn-goto" style="margin:0 0 8px;">🔍 Open Content Audit (view mode)</button>
             <div id="bb-tk-audit-banner" style="display:none;"></div>
             <div id="bb-tk-wordcount" class="bb-wordcount" title="Words / reading time in the editor content">—</div>

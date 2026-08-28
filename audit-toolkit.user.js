@@ -3,7 +3,7 @@
 // @namespace    rcpi-content-audit
 // @description  View-mode content audit: WCAG a11y report, broken link/image checker, URL lint, DOI/PMID citation report, copyright/H5P image audit. Read-only — this script never writes to page or editor content; see the Edit Toolkit for fixes.
 // @match        https://brightspace.rcpi.ie/*
-// @version      4.3
+// @version      4.2
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/audit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/audit-toolkit.user.js
@@ -50,6 +50,40 @@
   }
   function saveSettings(s) { GM_setValue(SETTINGS_KEY, JSON.stringify(s)); }
   let FEATURES = loadSettings();
+
+  // ─── SNIPPET LOCATOR ─────────────────────────────────────────────────
+  const LOCATE_SNIPPETS_KEY = 'rcpi-audit-locate-snippets-v1';
+  function loadLocateSnippets() {
+    try { return JSON.parse(GM_getValue(LOCATE_SNIPPETS_KEY, '[]')); }
+    catch { return []; }
+  }
+  function saveLocateSnippets(list) { GM_setValue(LOCATE_SNIPPETS_KEY, JSON.stringify(list)); }
+  function parseSnippets(text) {
+    return text.split(/\r?\n---\r?\n/).map(s => s.trim()).filter(Boolean);
+  }
+  function normalizeHtml(html) { return html.replace(/\s+/g, ' ').trim(); }
+
+  // For each snippet, find matching elements (assumes a clean copy of an
+  // element's outerHTML) and keep only the most specific (deepest) match —
+  // if a match's own subtree also contains a match, the outer one is
+  // dropped so a giant ancestor doesn't win just because it also contains
+  // the text. Flattens all snippets' matches together, tagged by which
+  // snippet they came from, so callers can sort/step through in one list.
+  function findSnippetMatches(snippets) {
+    const allEls = Array.from(document.body.querySelectorAll('*'));
+    const flat = [];
+    snippets.forEach((snippet, i) => {
+      const needle = normalizeHtml(snippet);
+      if (!needle) return;
+      const hits = allEls.filter(el => normalizeHtml(el.outerHTML).includes(needle));
+      const specific = hits.filter(el => !hits.some(o => o !== el && el.contains(o)));
+      specific.forEach(el => flat.push({ el, snippetIndex: i }));
+    });
+    // All rects read in the same pass, so plain viewport-top order is safe
+    // even without adding scrollY back in.
+    flat.sort((a, b) => a.el.getBoundingClientRect().top - b.el.getBoundingClientRect().top);
+    return flat;
+  }
 
   // UI mounts on the real top document — position:fixed inside a nested
   // content iframe only pins to that iframe's own viewport otherwise.
@@ -428,6 +462,72 @@
     });
   }
 
+  // ─── SNIPPET LOCATOR TAB ────────────────────────────────────────────
+  function renderLocateTab(bodyEl) {
+    bodyEl.innerHTML = `
+      <p class="rcpi-hint">Paste one or more HTML snippets — a clean copy of an element's source. Separate multiple snippets with a line containing just <code>---</code>. Locate finds each on the page and steps through them top to bottom.</p>
+      <textarea class="rcpi-textarea" data-snippets rows="8"></textarea>
+      <div class="rcpi-tab-toolbar" style="margin-top:8px;">
+        <button class="rcpi-btn" data-run>Find &amp; Locate</button>
+        <button class="rcpi-btn sec" data-save>Save snippets</button>
+      </div>
+      <div class="rcpi-progress" data-status></div>
+      <div class="rcpi-tab-toolbar" data-stepper style="display:none;">
+        <button class="rcpi-btn sec" data-prev>◀ Prev</button>
+        <span class="rcpi-muted" data-count></span>
+        <button class="rcpi-btn sec" data-next>Next ▶</button>
+      </div>
+      <div class="rcpi-list" data-results></div>
+    `;
+    const ta = bodyEl.querySelector('[data-snippets]');
+    ta.value = loadLocateSnippets().join('\n---\n');
+    bodyEl.querySelector('[data-save]').addEventListener('click', () => {
+      saveLocateSnippets(parseSnippets(ta.value));
+      S.toast('Snippets saved', uiMountDoc);
+    });
+
+    let matches = [];
+    let cursor = -1;
+    const statusEl = bodyEl.querySelector('[data-status]');
+    const stepperEl = bodyEl.querySelector('[data-stepper]');
+    const countEl = bodyEl.querySelector('[data-count]');
+    const resultsEl = bodyEl.querySelector('[data-results]');
+
+    function goTo(i) {
+      if (!matches.length) return;
+      cursor = ((i % matches.length) + matches.length) % matches.length;
+      S.locateInPage(matches[cursor].el);
+      countEl.textContent = `${cursor + 1} / ${matches.length}`;
+      resultsEl.querySelectorAll('.rcpi-row').forEach((r, ri) => r.classList.toggle('rcpi-row-active', ri === cursor));
+    }
+
+    function run() {
+      const snippets = parseSnippets(ta.value);
+      saveLocateSnippets(snippets);
+      matches = findSnippetMatches(snippets);
+      cursor = -1;
+      if (!matches.length) {
+        statusEl.textContent = snippets.length ? 'No matches found on this page.' : 'Paste at least one snippet.';
+        stepperEl.style.display = 'none';
+        resultsEl.innerHTML = '';
+        return;
+      }
+      statusEl.textContent = `${matches.length} match${matches.length === 1 ? '' : 'es'} found, ordered top to bottom.`;
+      stepperEl.style.display = 'flex';
+      resultsEl.innerHTML = matches.map((m, i) => `
+        <div class="rcpi-row">
+          <div class="rcpi-row-main"><span class="rcpi-cat">#${i + 1}</span><span class="rcpi-msg">${S.escapeHtml(m.el.tagName.toLowerCase())}${m.el.id ? '#' + S.escapeHtml(m.el.id) : ''} — snippet ${m.snippetIndex + 1}</span></div>
+          <button class="rcpi-locate-btn">Locate</button>
+        </div>`).join('');
+      resultsEl.querySelectorAll('.rcpi-locate-btn').forEach((btn, i) => btn.addEventListener('click', () => goTo(i)));
+      goTo(0);
+    }
+
+    bodyEl.querySelector('[data-run]').addEventListener('click', run);
+    bodyEl.querySelector('[data-prev]').addEventListener('click', () => goTo(cursor - 1));
+    bodyEl.querySelector('[data-next]').addEventListener('click', () => goTo(cursor + 1));
+  }
+
   // ─── SHELL / FAB BADGE ────────────────────────────────────────────────
   let shell = null;
   function updateFabBadge() {
@@ -445,6 +545,7 @@
       { id: 'links', label: 'Links & URLs', render: renderLinksTab },
       { id: 'citations', label: 'Citations', render: renderCitationsTab },
       { id: 'copyright', label: 'Copyright & H5P', render: renderCopyrightTab },
+      { id: 'locate', label: '📍 Locate', render: renderLocateTab },
       { id: 'settings', label: 'Settings', render: renderSettingsTab },
       ...S.CUSTOM_AUDIT_TABS, // expansion point — see shared core registerAuditTab()
     ];
@@ -519,6 +620,7 @@
       }
       .rcpi-locate-btn:hover { background: #f8f9fa; }
       .rcpi-locate-btn:disabled { opacity: .4; cursor: default; }
+      .rcpi-row-active { background: #eef3fb; }
       .rcpi-progress { font-size: 12px; color: #6e7477; margin-bottom: 6px; }
       .rcpi-set-row { display: block; font-size: 13px; margin-bottom: 8px; }
       .rcpi-textarea { width: 100%; box-sizing: border-box; font: 12px monospace; border: 1px solid #cdd5dc; border-radius: 4px; padding: 6px; }
