@@ -195,6 +195,8 @@
   function locateInPage(el) {
     if (!el) return;
     try {
+      const elDoc = el.ownerDocument || document;
+      injectLocateFlashCss(elDoc);
       revealAncestors(el);
       el.scrollIntoView({ behavior: 'smooth', block: 'center' });
       clearTimeout(el._rcpiLocateTimer);
@@ -203,6 +205,28 @@
       el.classList.add('rcpi-locate-flash');
       el._rcpiLocateTimer = setTimeout(() => el.classList.remove('rcpi-locate-flash'), 2200);
     } catch (e) { console.error('[rcpi] locateInPage failed:', e); }
+  }
+
+  // The flagged element can live in a different document (a content
+  // iframe) than the one the shell UI/CSS was mounted in, e.g. via
+  // findTopSameOriginDoc() — style tags don't cross frame boundaries, so
+  // the flash needs its own tiny stylesheet injected into that document.
+  function injectLocateFlashCss(doc) {
+    if (doc.getElementById('rcpi-locate-flash-css')) return;
+    const s = doc.createElement('style');
+    s.id = 'rcpi-locate-flash-css';
+    s.textContent = `
+      .rcpi-locate-flash {
+        outline: 3px solid #ffb300 !important;
+        outline-offset: 2px;
+        animation: rcpi-locate-pulse 2.2s ease-out;
+      }
+      @keyframes rcpi-locate-pulse {
+        0%, 40% { background-color: rgba(255,179,0,.35); box-shadow: 0 0 0 6px rgba(255,179,0,.25); }
+        100% { background-color: transparent; box-shadow: 0 0 0 6px rgba(255,179,0,0); }
+      }
+    `;
+    doc.head.appendChild(s);
   }
 
   // ─── IGNORE-LIST / SESSION STORAGE ────────────────────────────────────
