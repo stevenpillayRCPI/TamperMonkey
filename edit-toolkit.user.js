@@ -5,7 +5,7 @@
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      5.3
+// @version      5.5
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -1217,13 +1217,22 @@
 </li>`;
   }
 
+  // Standard non-decorative figcaption content: editable caption text, plus a
+  // dedicated license line styled by CSS (.image-license) instead of ad hoc
+  // inline font-size spans. Add this CSS rule to bootstrap.css:
+  //   .image-license { display: block; font-size: 16px; }
+  // (display:block puts it on its own line without a manual <br>.)
+  function captionHTML(text) {
+    return `<span contenteditable="true">${text}<span class="image-license">License / attribution </span></span>`;
+  }
+
   // Image placeholder (to replace an icon context)
   function genImagePlaceholder() {
     return `<figure class="">
   <div class="image-container" style="position: relative;" contenteditable="false">
     <img src="https://placehold.co/1920x1080/EEE/31343C" alt="ALT TEXT NEEDED" class="img-fluid">
   </div>
-  <figcaption contenteditable="false"><span contenteditable="true">Caption </span></figcaption>
+  <figcaption contenteditable="false">${captionHTML('Caption ')}</figcaption>
 </figure>`;
   }
 
@@ -1277,7 +1286,7 @@
     <div class="image-container" contenteditable="true">
       <img src="https://placehold.co/1920x1080/EEE/31343C" alt="REQUIRED" class="img-fluid">
     </div>
-    <figcaption contenteditable="false"><span contenteditable="true">Caption </span></figcaption>
+    <figcaption contenteditable="false">${captionHTML('Caption ')}</figcaption>
   </figure>
 </div></div>`);
   }
@@ -1498,11 +1507,11 @@
             <p class="bb-hint">Components on this page. <b>⟳ +1</b> adds an item directly into the live component.<br>
             <b>Alt+right-click</b> in the editor for BB actions (plain right-click = normal TinyMCE menu):<br>
             <b>cell(s)</b> → table colours/structure · <b>selected text</b> → wrap / 2-columns · <b>component</b> → convert · <b>icon</b> → swap · <b>image</b> → figure/decorative · <b>link</b> → tracking/new-tab · <b>YouTube</b> → privacy · <b>PDF</b> → download link · <b>row</b> → colour / insert / PDF / snippet · <b>gap</b> → insert row.</p>
+            <button id="bb-tk-fix" class="bb-btn bb-btn-fix" style="margin:0 0 10px;">🔧 Check &amp; fix page issues</button>
             <button id="bb-tk-insert-row" class="bb-btn bb-btn-plus" style="margin:0 0 8px;">+ Insert row at cursor</button>
             <button id="bb-tk-outline" class="bb-btn bb-btn-goto" style="margin:0 0 8px;">🗂 Heading outline</button>
             <button id="bb-tk-replace" class="bb-btn bb-btn-goto" style="margin:0 0 8px;">🔎 Find &amp; replace</button>
             <button id="bb-tk-citations" class="bb-btn bb-btn-goto" style="margin:0 0 8px;">📎 Link DOI / PMID citations</button>
-            <button id="bb-tk-fix" class="bb-btn bb-btn-goto" style="margin:0 0 8px;">🔧 Check &amp; fix page issues</button>
             <button id="bb-tk-audit-launch" class="bb-btn bb-btn-goto" style="margin:0 0 8px;">🔍 Open Content Audit (view mode)</button>
             <div id="bb-tk-audit-banner" style="display:none;"></div>
             <div id="bb-tk-wordcount" class="bb-wordcount" title="Words / reading time in the editor content">—</div>
@@ -5281,7 +5290,7 @@ function addParagraphToRow(rowEl) {
       const fig = tinyDoc.createElement('div');
       const alt = decorative ? '' : (imgEl.getAttribute('alt') || 'REQUIRED');
       const decoClass = decorative ? ' decorative' : '';
-      const figcap = decorative ? '' : `<figcaption contenteditable="false"><span contenteditable="true">Caption </span></figcaption>`;
+      const figcap = decorative ? '' : `<figcaption contenteditable="false">${captionHTML('Caption ')}</figcaption>`;
       fig.innerHTML = `<figure class="wysiwyg-mode${decoClass}"><div class="image-container" style="position: relative;" contenteditable="false"><div contenteditable="true"><img src="${src}" alt="${alt}" class="img-fluid${decoClass}"></div></div>${figcap}</figure>`;
       const figure = fig.firstElementChild;
       // Replace the img (or its nearest editable wrapper) with the figure
@@ -5320,7 +5329,7 @@ function addParagraphToRow(rowEl) {
         if (!figure.querySelector('figcaption')) {
           const cap = tinyDoc.createElement('figcaption');
           cap.setAttribute('contenteditable', 'false');
-          cap.innerHTML = '<span contenteditable="true">Caption </span>';
+          cap.innerHTML = captionHTML('Caption ');
           figure.appendChild(cap);
         }
       }
@@ -5334,7 +5343,7 @@ function addParagraphToRow(rowEl) {
       if (!figure || figure.querySelector('figcaption')) return;
       const cap = tinyDoc.createElement('figcaption');
       cap.setAttribute('contenteditable', 'false');
-      cap.innerHTML = '<span contenteditable="true">Caption </span>';
+      cap.innerHTML = captionHTML('Caption ');
       figure.appendChild(cap);
     }, 'image add caption', { ungated: true });
     finishImage(didWrite, 'Caption added');
@@ -5724,6 +5733,7 @@ function addParagraphToRow(rowEl) {
         cursor: pointer; font-size: 11px; white-space: nowrap;
       }
       .bb-btn-plus  { background: #002d72; color: #fff; border-color: #002d72; }
+      .bb-btn-fix   { background: #b3541e; color: #fff; border-color: #b3541e; font-size: 15px; font-weight: 600; padding: 10px 12px; }
       .bb-btn-goto  { background: #fff; color: #6e7477; border-color: #cdd5dc; }
       .bb-btn-img   { background: #6f42c1; color: #fff; border-color: #6f42c1; font-size: 11px; }
       .bb-audit-row {
