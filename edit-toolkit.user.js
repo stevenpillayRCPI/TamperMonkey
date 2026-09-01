@@ -5,7 +5,7 @@
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      4.7
+// @version      5.3
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -102,7 +102,7 @@
       if (!body) { dbg('tinyWrite failed (no body):', label); return false; }
       mutateFn(ed, body);
       ed.setDirty(true);
-      ed.fire('input');
+      ed.dispatch('input');
       dbg('tinyWrite OK:', label);
       return true;
     } catch (err) {
@@ -141,7 +141,7 @@
     card: (variant, txt) => `<div contenteditable="false"><div class="col-12"><div class="card card-${variant}" contenteditable="false"><div class="card-body"><div contenteditable="true"><h3 class="card-title">Title</h3><p class="card-text">${txt}</p></div></div></div></div></div>`,
 
     // Icon card (icon-left only — the only variant the builder produces).
-    iconCard: txt => `<div contenteditable="false"><div class="col-12"><div class="card card-white card-with-icon" contenteditable="false"><div class="card-body d-flex"><div class="icon-column"><i class="bi bi-star-fill" style="color: var(--bs-tertiary-dark);"></i></div><div class="content-column"><div contenteditable="true"><h3 class="card-title">Title</h3><p class="card-text">${txt}</p></div></div></div></div></div></div>`,
+    iconCard: (txt, variant = 'white') => `<div contenteditable="false"><div class="col-12"><div class="card card-${variant} card-with-icon" contenteditable="false"><div class="card-body d-flex"><div class="icon-column"><i class="bi bi-star-fill" style="color: var(--bs-tertiary-dark);"></i></div><div class="content-column"><div contenteditable="true"><h3 class="card-title">Title</h3><p class="card-text">${txt}</p></div></div></div></div></div></div>`,
 
     // Two-column image+text and text+image (image uses col-md-6).
     colImageText: txt => `<div contenteditable="false"><div class="image-column"><div class="col-12 col-md-6"><div class="figure-wrapper"><figure class="wysiwyg-mode"><div class="image-container" style="position: relative;" contenteditable="false"><div contenteditable="true"><img src="https://placehold.co/1920x1080/EEE/31343C" alt="REQUIRED" class="img-fluid"></div></div><figcaption contenteditable="false"><span contenteditable="true">Caption </span></figcaption></figure></div></div><div class="col-12 col-md-6" contenteditable="false"><div contenteditable="true"><p>${txt}</p></div></div></div></div>`,
@@ -1227,6 +1227,200 @@
 </figure>`;
   }
 
+  // ─── INSERT COMPONENT LIBRARY ───────────────────────────────────────────────
+  // Each shell builder returns a COMPLETE new row (already passed through
+  // TPL.wrapRow) ready to be inserted as a sibling row, the same way insertRow()
+  // inserts a plain/coloured row. Markup is sourced from RCPI-BS-Block-Builder.html
+  // / utils.js ground truth, reusing the existing per-item generators for the
+  // first item of multi-item components.
+
+  function shellColumns2() {
+    return TPL.wrapRow(`<div class="columns-2" contenteditable="false">
+  <div class="col-12 col-sm-6"><div contenteditable="true"><p>Content </p></div></div>
+  <div class="col-12 col-sm-6"><div contenteditable="true"><p>Content </p></div></div>
+</div>`);
+  }
+
+  function shellColumns2NoLine() {
+    return TPL.wrapRow(`<div class="columns-2-no-line" contenteditable="false">
+  <div class="col-12 col-sm-6"><div contenteditable="true"><p>Content </p></div></div>
+  <div class="col-12 col-sm-6"><div contenteditable="true"><p>Content </p></div></div>
+</div>`);
+  }
+
+  function shellColumns3() {
+    return TPL.wrapRow(`<div class="columns-3" contenteditable="false">
+  <div class="col-12 col-md-4"><div contenteditable="true"><p>Content </p></div></div>
+  <div class="col-12 col-md-4"><div contenteditable="true"><p>Content </p></div></div>
+  <div class="col-12 col-md-4"><div contenteditable="true"><p>Content </p></div></div>
+</div>`);
+  }
+
+  function shellLargeNumberList() {
+    return TPL.wrapRow(`<div contenteditable="false">
+  <ol class="large-number" contenteditable="true">
+    <li contenteditable="true">Item </li>
+    <li contenteditable="true">Item </li>
+  </ol>
+</div>`);
+  }
+
+  function shellIconList() {
+    return TPL.wrapRow(`<div class="col-12"><div contenteditable="false">
+  <ul class="icon-list" contenteditable="true">${genIconListItem()}</ul>
+</div></div>`);
+  }
+
+  function shellImagePlaceholder() {
+    return TPL.wrapRow(`<div class="col-12"><div class="figure-wrapper">
+  <figure class="wysiwyg-mode" contenteditable="false">
+    <div class="image-container" contenteditable="true">
+      <img src="https://placehold.co/1920x1080/EEE/31343C" alt="REQUIRED" class="img-fluid">
+    </div>
+    <figcaption contenteditable="false"><span contenteditable="true">Caption </span></figcaption>
+  </figure>
+</div></div>`);
+  }
+
+  function shellDecorativeImagePlaceholder() {
+    return TPL.wrapRow(`<div class="col-12"><div class="figure-wrapper">
+  <figure class="decorative" contenteditable="false">
+    <div class="image-container" contenteditable="true">
+      <img src="https://placehold.co/1920x1080/EEE/31343C" alt="" class="img-fluid">
+    </div>
+  </figure>
+</div></div>`);
+  }
+
+  function shellImageTextLeft()  { return TPL.wrapRow(TPL.colImageText('Content ')); }
+  function shellImageTextRight() { return TPL.wrapRow(TPL.colTextImage('Content ')); }
+  function shellIconTextLeft()   { return TPL.wrapRow(TPL.colIconText('Content ')); }
+  function shellIconTextRight()  { return TPL.wrapRow(TPL.colTextIcon('Content ')); }
+
+  function shellCard(variant)  { return TPL.wrapRow(TPL.card(variant, 'Content ')); }
+  function shellIconCard(variant) { return TPL.wrapRow(TPL.iconCard('Content ', variant)); }
+
+  function shellAccordion() {
+    const id = uid('accordion');
+    return TPL.wrapRow(TPL.accordion(id, genAccordionItem(id, 1)));
+  }
+
+  function shellNumberedAccordion() {
+    const id = uid('numberedAccordion');
+    return TPL.wrapRow(`<div class="accordion numbered-accordion" id="${id}">${genNumberedAccordionItem(id, 0)}</div>`);
+  }
+
+  function shellIconAccordion() {
+    const id = uid('iconAccordion');
+    return TPL.wrapRow(`<div class="accordion icon-accordion" id="${id}">${genIconAccordionItem(id, 0)}</div>`);
+  }
+
+  function shellHorizontalTabs() {
+    const id = uid('tabs');
+    const nav = TPL.hTabNav(id, 0, 'New Tab ', true);
+    const pane = TPL.hTabPane(id, 0, '<h3>New Tab </h3><p>Content </p>', true);
+    return TPL.wrapRow(TPL.horizontalTabs(id, nav, pane));
+  }
+
+  function shellVerticalTabs() {
+    const wrapId = uid('vtabs');
+    const t = genVerticalTabItem(wrapId, Date.now());
+    const nav = t.nav.replace('class="nav-link"', 'class="nav-link active"')
+                      .replace('aria-selected="false"', 'aria-selected="true"');
+    const content = t.content.replace('class="tab-pane"', 'class="tab-pane active"');
+    return TPL.wrapRow(`<div class="vertical-tabs-wrapper" contenteditable="false">
+  <ul class="nav nav-tabs d-flex flex-row flex-md-column" id="${wrapId}-nav" role="tablist">${nav}</ul>
+  <div class="tab-content">${content}</div>
+</div>`);
+  }
+
+  function shellFlipCards() {
+    const card = TPL.flipCard(0, 'Front Title ', 'Back Title ', 'Content ', flipColClass(1));
+    return TPL.wrapRow(TPL.flipCards(card));
+  }
+
+  function shellTextCarousel() {
+    const id = uid('textCarousel');
+    const slide = genTextCarouselSlide(id, 0).replace('of ?', 'of 1');
+    return TPL.wrapRow(`<div id="${id}" class="text-carousel carousel slide wysiwyg-mode col-12" aria-roledescription="carousel" aria-label="Text carousel">
+  <div class="carousel-indicators text-carousel-indicators" role="tablist"><button type="button" data-bs-target="#${id}" data-bs-slide-to="0" role="tab" class="active" aria-selected="true" aria-current="true" aria-label="Slide 1"></button></div>
+  <div class="text-carousel-container">
+    <button class="text-carousel-control-prev btn btn-dark" type="button" data-bs-target="#${id}" data-bs-slide="prev" aria-label="Previous slide"><span class="carousel-control-prev-icon" aria-hidden="true"></span><span class="visually-hidden">Previous</span></button>
+    <div class="carousel-inner">${slide}</div>
+    <button class="text-carousel-control-next btn btn-dark" type="button" data-bs-target="#${id}" data-bs-slide="next" aria-label="Next slide"><span class="carousel-control-next-icon" aria-hidden="true"></span><span class="visually-hidden">Next</span></button>
+  </div>
+</div>`);
+  }
+
+  function shellImageCarousel() {
+    const id = uid('carousel');
+    const slide = genCarouselSlide(id, 0).replace('of ?', 'of 1');
+    return TPL.wrapRow(`<div id="${id}" class="carousel image-carousel slide wysiwyg-mode col-12 col-md-10 offset-md-1" aria-roledescription="carousel" aria-label="Image carousel">
+  <div class="carousel-inner">${slide}</div>
+  <div class="d-flex"><button class="carousel-control-prev btn btn-dark w-1" type="button" data-bs-target="#${id}" data-bs-slide="prev"><span class="carousel-control-prev-icon" aria-hidden="true"></span><span class="visually-hidden">Previous</span></button> <button class="carousel-control-next btn btn-dark w-1" type="button" data-bs-target="#${id}" data-bs-slide="next"><span class="carousel-control-next-icon" aria-hidden="true"></span><span class="visually-hidden">Next</span></button></div>
+</div>`);
+  }
+
+  function shellTable() {
+    return TPL.wrapRow(`<div class="col-12"><div class="table-responsive"><table class="table"><caption>Header on Top</caption>
+<thead><tr><th scope="col">Header</th><th scope="col">Header</th><th scope="col">Header</th></tr></thead>
+<tbody><tr><td>Data</td><td>Data</td><td>Data</td></tr><tr><td>Data</td><td>Data</td><td>Data</td></tr></tbody>
+</table></div></div>`);
+  }
+
+  function shellRevealTable() {
+    return TPL.wrapRow(`<div class="col-12"><div class="table-responsive row reveal-table"><table class="table"><caption contenteditable="true">Caption</caption>
+<thead><tr><th scope="row" contenteditable="true">Prompt</th><th scope="row" contenteditable="true">Reveal Content</th></tr></thead>
+<tbody>${genRevealTableRow()}</tbody>
+</table></div></div>`);
+  }
+
+  function shellClickAndReveal() {
+    return TPL.wrapRow(genRevealItem());
+  }
+
+  // The insertable library, grouped by category for the menu. `build` returns
+  // a full ready-to-insert row (see shell functions above).
+  const INSERT_LIBRARY = [
+    { category: 'Text & Lists', label: '2-Column Text',                build: shellColumns2 },
+    { category: 'Text & Lists', label: '2-Column Text (No Line)',      build: shellColumns2NoLine },
+    { category: 'Text & Lists', label: '3-Column Text',                build: shellColumns3 },
+    { category: 'Text & Lists', label: 'Large Number List',            build: shellLargeNumberList },
+    { category: 'Text & Lists', label: 'Icon List',                    build: shellIconList },
+
+    { category: 'Images', label: 'Image Placeholder',                  build: shellImagePlaceholder },
+    { category: 'Images', label: 'Decorative Image Placeholder',       build: shellDecorativeImagePlaceholder },
+    { category: 'Images', label: 'Image + Text (Image Left)',          build: shellImageTextLeft },
+    { category: 'Images', label: 'Image + Text (Image Right)',         build: shellImageTextRight },
+    { category: 'Images', label: 'Icon + Text (Icon Left)',            build: shellIconTextLeft },
+    { category: 'Images', label: 'Icon + Text (Icon Right)',           build: shellIconTextRight },
+
+    { category: 'Cards', label: 'Card (White)',                        build: () => shellCard('white') },
+    { category: 'Cards', label: 'Card (Primary)',                      build: () => shellCard('primary') },
+    { category: 'Cards', label: 'Card (Secondary)',                    build: () => shellCard('secondary') },
+    { category: 'Cards', label: 'Card (Tertiary)',                     build: () => shellCard('tertiary') },
+    { category: 'Cards', label: 'Icon Card (White)',                   build: () => shellIconCard('white') },
+    { category: 'Cards', label: 'Icon Card (Primary)',                 build: () => shellIconCard('primary') },
+    { category: 'Cards', label: 'Icon Card (Secondary)',               build: () => shellIconCard('secondary') },
+    { category: 'Cards', label: 'Icon Card (Tertiary)',                build: () => shellIconCard('tertiary') },
+
+    { category: 'Accordions', label: 'Accordion',                      build: shellAccordion },
+    { category: 'Accordions', label: 'Numbered Accordion',             build: shellNumberedAccordion },
+    { category: 'Accordions', label: 'Icon Accordion',                 build: shellIconAccordion },
+
+    { category: 'Tabs', label: 'Horizontal Tabs',                      build: shellHorizontalTabs },
+    { category: 'Tabs', label: 'Vertical Tabs',                        build: shellVerticalTabs },
+
+    { category: 'Carousels', label: 'Flip Cards',                      build: shellFlipCards },
+    { category: 'Carousels', label: 'Text Carousel',                   build: shellTextCarousel },
+    { category: 'Carousels', label: 'Image Carousel',                  build: shellImageCarousel },
+
+    { category: 'Tables', label: 'Table',                              build: shellTable },
+    { category: 'Tables', label: 'Reveal Table',                       build: shellRevealTable },
+
+    { category: 'Interactive', label: 'Click and Reveal',              build: shellClickAndReveal },
+  ];
+
   // ─── ADD-ITEM LOGIC ─────────────────────────────────────────────────────────
   function getAddItemHTML(component) {
     const { type, el } = component;
@@ -1304,11 +1498,11 @@
             <p class="bb-hint">Components on this page. <b>⟳ +1</b> adds an item directly into the live component.<br>
             <b>Alt+right-click</b> in the editor for BB actions (plain right-click = normal TinyMCE menu):<br>
             <b>cell(s)</b> → table colours/structure · <b>selected text</b> → wrap / 2-columns · <b>component</b> → convert · <b>icon</b> → swap · <b>image</b> → figure/decorative · <b>link</b> → tracking/new-tab · <b>YouTube</b> → privacy · <b>PDF</b> → download link · <b>row</b> → colour / insert / PDF / snippet · <b>gap</b> → insert row.</p>
-            <button id="bb-tk-fix" class="bb-btn bb-btn-fix-primary">🔧 Check &amp; fix page issues</button>
             <button id="bb-tk-insert-row" class="bb-btn bb-btn-plus" style="margin:0 0 8px;">+ Insert row at cursor</button>
             <button id="bb-tk-outline" class="bb-btn bb-btn-goto" style="margin:0 0 8px;">🗂 Heading outline</button>
             <button id="bb-tk-replace" class="bb-btn bb-btn-goto" style="margin:0 0 8px;">🔎 Find &amp; replace</button>
             <button id="bb-tk-citations" class="bb-btn bb-btn-goto" style="margin:0 0 8px;">📎 Link DOI / PMID citations</button>
+            <button id="bb-tk-fix" class="bb-btn bb-btn-goto" style="margin:0 0 8px;">🔧 Check &amp; fix page issues</button>
             <button id="bb-tk-audit-launch" class="bb-btn bb-btn-goto" style="margin:0 0 8px;">🔍 Open Content Audit (view mode)</button>
             <div id="bb-tk-audit-banner" style="display:none;"></div>
             <div id="bb-tk-wordcount" class="bb-wordcount" title="Words / reading time in the editor content">—</div>
@@ -1468,6 +1662,13 @@
     try { GM_setValue('bb-tk-minimized', min ? '1' : '0'); } catch {}
   }
 
+  // Component types the +1/-1/dup item controls apply to. Shared between the
+  // docked panel list and the Alt+right-click component context menu.
+  const COMP_NO_ADD_TYPES = ['Icon Card', 'Image', 'Image Column', 'Click and Reveal'];
+  const COMP_REPLACEABLE_TYPES = ['Accordion', 'Numbered Accordion', 'Icon Accordion',
+                       'Horizontal Tabs', 'Vertical Tabs', 'Flipcards',
+                       'Text Carousel', 'Image Carousel', 'Reveal Table', 'Icon List'];
+
   function refreshComponentList() {
     const list = document.getElementById('bb-tk-comp-list');
     if (!list) return;
@@ -1496,10 +1697,8 @@
       actions.className = 'bb-comp-actions';
 
       // Component item-adding buttons
-      const noAddTypes = ['Icon Card', 'Image', 'Image Column', 'Click and Reveal'];
-      const replaceable = ['Accordion', 'Numbered Accordion', 'Icon Accordion',
-                           'Horizontal Tabs', 'Vertical Tabs', 'Flipcards',
-                           'Text Carousel', 'Image Carousel', 'Reveal Table', 'Icon List'];
+      const noAddTypes = COMP_NO_ADD_TYPES;
+      const replaceable = COMP_REPLACEABLE_TYPES;
 
       if (!noAddTypes.includes(comp.type)) {
         // PRIMARY: replace-whole-component with +1 item, as a pasteable WYSIWYG row.
@@ -1836,7 +2035,7 @@
         try {
           ed.setContent(snap.html);
           ed.setDirty(true);
-          ed.fire('input');
+          ed.dispatch('input');
           toast('✓ Snapshot restored', 'success');
           scheduleAudit();
           refreshComponentList();
@@ -2410,6 +2609,29 @@
     menu.appendChild(sub2);
     add('⧉ Duplicate component', () => duplicateComponent(compEl));
 
+    // Add / remove item — mirrors the docked panel's +1 / -1 controls, for
+    // components whose item count can vary (flipcards, accordions, tabs,
+    // carousels, reveal table, icon list).
+    if (type && COMP_REPLACEABLE_TYPES.includes(type)) {
+      const comps = detectComponents();
+      const comp = comps.find(c => c.el === compEl)
+        || comps.find(c => compEl.contains(c.el) || c.el.contains(compEl));
+      if (comp) {
+        add('+ Add item', () => {
+          if (addItemDirect(comp)) {
+            toast(`✓ Added one item to ${comp.type}`, 'success');
+            scheduleAudit();
+            refreshComponentList();
+          } else {
+            toast('Could not add item — see console', 'error');
+          }
+        });
+        if (comp.count && comp.count > 1) {
+          add('− Remove last item', () => deleteLastItem(comp), true);
+        }
+      }
+    }
+
     // Convert (only for header+content types)
     const kind = componentKind(compEl);
     const convertibleKinds = ['accordion','numbered-accordion','icon-accordion','horizontal-tabs','vertical-tabs','flipcards'];
@@ -2723,7 +2945,7 @@
     try {
       ed.execCommand(cmd, false, value);
       ed.setDirty(true);
-      ed.fire('input');
+      ed.dispatch('input');
       dbg('tableCmd ran:', cmd, value !== undefined ? value : '');
       return true;
     } catch (err) {
@@ -2758,7 +2980,7 @@
         }
       });
       ed.setDirty(true);
-      ed.fire('input');
+      ed.dispatch('input');
       toast(hex ? '✓ Cell background set' : '✓ Cell background cleared', 'success');
     } catch (err) {
       dbg('applyCellBackground failed', err);
@@ -2786,7 +3008,7 @@
         else ed.execCommand('mceRemoveTextcolor', false, 'forecolor');
       }
       ed.setDirty(true);
-      ed.fire('input');
+      ed.dispatch('input');
       toast(hex ? '✓ Font colour set' : '✓ Font colour cleared', 'success');
     } catch (err) {
       dbg('applyCellFontColour failed', err);
@@ -3782,6 +4004,7 @@
   // worth cleaning? We only intercept when it does, so normal pastes pass through.
   function looksLikeWordHtml(html) {
     if (!html) return false;
+    if (/x-tinymce\/html/i.test(html)) return false; // TinyMCE-to-TinyMCE copy, not Word
     return /<o:p|mso-|class=("|')?Mso|urn:schemas-microsoft-com|<!--\[if|<w:|<m:|style=("|')[^"']*mso/i.test(html)
         || /<span[^>]+style=/i.test(html) && /font-family|font-size|line-height/i.test(html);
   }
@@ -3853,7 +4076,7 @@
       if (ed && cleaned) {
         ed.insertContent(cleaned);
         ed.setDirty(true);
-        ed.fire('input');
+        ed.dispatch('input');
         toast('✓ Pasted & cleaned Word formatting', 'success');
         scheduleAudit();
       } else if (cleaned) {
@@ -4093,7 +4316,96 @@ function addParagraphToRow(rowEl) {
       menu.appendChild(btn);
     });
 
+    const compBtn = document.createElement('button');
+    compBtn.textContent = '▸ Insert component…';
+    compBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openInsertComponentMenu(x, y, anchorRow, position, absolute);
+    });
+    menu.appendChild(compBtn);
+
     positionMenu(menu, x, y, absolute);
+  }
+
+  // Component library menu: grouped by category. Reuses the same anchor/position
+  // targeting as openInsertRowMenu so the component lands in the same spot the
+  // row-colour menu would have inserted an empty row.
+  function openInsertComponentMenu(x, y, anchorRow, position, absolute) {
+    closeAnyMenu();
+    dbg('openInsertComponentMenu. anchorRow=', !!anchorRow, 'position=', position);
+
+    const menu = document.createElement('div');
+    menu.id = 'bb-insertcomponent-menu';
+    menu.className = 'bb-ctx-menu';
+    menu.innerHTML = `<div class="bb-ctx-title">Insert component</div>`;
+
+    let lastCategory = null;
+    INSERT_LIBRARY.forEach(entry => {
+      if (entry.category !== lastCategory) {
+        const sub = document.createElement('div');
+        sub.className = 'bb-ctx-sub';
+        sub.textContent = entry.category;
+        menu.appendChild(sub);
+        lastCategory = entry.category;
+      }
+      const btn = document.createElement('button');
+      btn.textContent = entry.label;
+      btn.addEventListener('click', () => {
+        insertComponent(entry, anchorRow, position);
+        closeAnyMenu();
+      });
+      menu.appendChild(btn);
+    });
+
+    positionMenu(menu, x, y, absolute);
+  }
+
+  // Insert a library component as a new sibling row, using the same
+  // anchor-row / at-caret targeting logic as insertRow().
+  function insertComponent(entry, anchorRow, position) {
+    const html = entry.build();
+
+    const didWrite = tinyWrite((ed) => {
+      const tmp = tinyDoc.createElement('div');
+      tmp.innerHTML = html.trim();
+      const newRow = tmp.firstElementChild;
+
+      if (anchorRow && anchorRow.parentNode) {
+        if (position === 'before') anchorRow.parentNode.insertBefore(newRow, anchorRow);
+        else anchorRow.parentNode.insertBefore(newRow, anchorRow.nextSibling);
+      } else {
+        const container = ed.getBody().querySelector('.container') || ed.getBody();
+        let node = ed.selection.getNode();
+        while (node && node.parentElement && node.parentElement !== container) {
+          node = node.parentElement;
+        }
+        if (node && node.parentElement === container) {
+          container.insertBefore(newRow, node.nextSibling);
+        } else {
+          container.appendChild(newRow);
+        }
+      }
+
+      try {
+        const editable = newRow.querySelector('.editable-row-content');
+        if (editable) {
+          const rng = tinyDoc.createRange();
+          rng.selectNodeContents(editable);
+          rng.collapse(true);
+          const s = tinyWin.getSelection();
+          s.removeAllRanges();
+          s.addRange(rng);
+        }
+      } catch (err) { dbg('caret place failed', err); }
+    }, 'insertComponent ' + entry.label + (anchorRow ? ' ' + position : ' at-caret'), { ungated: true });
+
+    if (didWrite) {
+      toast(`✓ ${entry.label} inserted`, 'success');
+      scheduleAudit();
+      return;
+    }
+    copyToClipboard(html);
+    toast(`✓ ${entry.label} copied — paste where you want it`, 'warn');
   }
 
   function insertRow(cls, anchorRow, position) {
@@ -4466,7 +4778,7 @@ function addParagraphToRow(rowEl) {
 
   function anyMenuEsc(e) { if (e.key === 'Escape') closeAnyMenu(); }
 
-  const BB_MENU_IDS = ['bb-row-menu', 'bb-insertrow-menu', 'bb-wrap-menu', 'bb-image-menu',
+  const BB_MENU_IDS = ['bb-row-menu', 'bb-insertrow-menu', 'bb-insertcomponent-menu', 'bb-wrap-menu', 'bb-image-menu',
     'bb-component-menu', 'bb-convert-menu', 'bb-table-menu', 'bb-icon-menu',
     'bb-pdf-menu', 'bb-youtube-menu', 'bb-link-menu', 'bb-pdf-embed-menu', 'bb-card-menu',
     'bb-animated-icon-menu'];
@@ -5413,12 +5725,6 @@ function addParagraphToRow(rowEl) {
       }
       .bb-btn-plus  { background: #002d72; color: #fff; border-color: #002d72; }
       .bb-btn-goto  { background: #fff; color: #6e7477; border-color: #cdd5dc; }
-      .bb-btn-fix-primary {
-        display: block; width: 100%; box-sizing: border-box;
-        padding: 9px 10px; margin: 0 0 10px; font-size: 13px; font-weight: 700;
-        background: #b3261e; color: #fff; border-color: #b3261e;
-      }
-      .bb-btn-fix-primary:hover { background: #921d17; border-color: #921d17; }
       .bb-btn-img   { background: #6f42c1; color: #fff; border-color: #6f42c1; font-size: 11px; }
       .bb-audit-row {
         display: flex; align-items: flex-start; gap: 6px;
