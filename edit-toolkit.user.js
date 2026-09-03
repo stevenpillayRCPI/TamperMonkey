@@ -5,7 +5,7 @@
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      5.5
+// @version      5.7
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -257,6 +257,16 @@
       }
     } catch {}
     return s.replace(/[^a-zA-Z0-9_-]/g, ch => '\\' + ch);
+  }
+
+  // Detect a Brightspace Creator+ embed / TinyMCE noneditable region. These
+  // strip or scope out our CSS and classes, so fixes whose only effect comes
+  // from a CSS class (e.g. a .visually-hidden span) must not be applied
+  // inside one — the "hidden" text would render visible instead.
+  function isInCreatorPlus(el) {
+    return !!(el && el.closest && el.closest(
+      '[class*="d2l-element"], [class^="d2l-cplus"], [class*=" d2l-cplus"], .mceNonEditable'
+    ));
   }
 
   function copyToClipboard(html) {
@@ -529,6 +539,58 @@
       });
     }
 
+    // 7b. Multiple <h1> elements: only one per page. Keep the first, downgrade
+    // the rest to <h2> (the heading-hierarchy check above then catches any
+    // resulting skip on a re-run).
+    {
+      const h1s = Array.from(body.querySelectorAll('h1'));
+      if (h1s.length > 1) {
+        const extra = h1s.slice(1);
+        fixes.push({
+          id: fid(), category: 'Accessibility',
+          label: `${extra.length} extra <h1>(s) found → downgrade to <h2> (first one kept)`,
+          apply: () => {
+            extra.forEach(h => {
+              const repl = tinyDoc.createElement('h2');
+              for (const a of Array.from(h.attributes)) repl.setAttribute(a.name, a.value);
+              while (h.firstChild) repl.appendChild(h.firstChild);
+              h.replaceWith(repl);
+            });
+          }
+        });
+      }
+    }
+
+    // 7c. Links to PDF files should say so in the link text. If some form of
+    // "pdf" is already present, normalise it to the standard "[PDF]" marker
+    // instead of appending a second one.
+    body.querySelectorAll('a[href]').forEach(a => {
+      const href = a.getAttribute('href') || '';
+      if (!/\.pdf(?:[?#]|$)/i.test(href)) return;
+      const text = (a.textContent || '').trim();
+      if (!text || /\[PDF\]$/.test(text)) return;
+      const hasPdfMention = /pdf/i.test(text);
+      fixes.push({
+        id: fid(), category: 'Links',
+        label: (hasPdfMention ? 'Standardise PDF mention → "[PDF]": "' : 'Add "[PDF]" to link text: "') + text.slice(0, 30) + '"',
+        apply: () => {
+          if (hasPdfMention) {
+            const walker = tinyDoc.createTreeWalker(a, NodeFilter.SHOW_TEXT);
+            let node;
+            while ((node = walker.nextNode())) {
+              if (/pdf/i.test(node.nodeValue)) {
+                node.nodeValue = node.nodeValue.replace(/\(?\s*pdf\s*\)?/i, '[PDF]');
+                return;
+              }
+            }
+            a.appendChild(tinyDoc.createTextNode(' [PDF]'));
+          } else {
+            a.appendChild(tinyDoc.createTextNode(' [PDF]'));
+          }
+        }
+      });
+    });
+
     // 8. Table accessibility: missing <caption>; header row not using
     // <th scope="col">; first-column row headers not using <th scope="row">.
     body.querySelectorAll('table').forEach(tbl => {
@@ -592,6 +654,18 @@
         }
       }
     });
+
+    // 8b. Missing lang attribute on the page's <html> element → default to English.
+    {
+      const htmlEl = body.ownerDocument && body.ownerDocument.documentElement;
+      if (htmlEl && !htmlEl.getAttribute('lang')) {
+        fixes.push({
+          id: fid(), category: 'Structure',
+          label: 'No lang attribute on the page → set lang="en"',
+          apply: () => { htmlEl.setAttribute('lang', 'en'); }
+        });
+      }
+    }
 
     // 9. Link-text quality (review only): vague link text or bare URLs.
     body.querySelectorAll('a[href]').forEach(a => {
@@ -672,6 +746,13 @@
           // is the header row, etc.) that the shared engine can't see —
           // skip here so the same table doesn't get flagged twice.
           if (is.category === 'Tables') return;
+          // Multiple <h1>s: this section's own check #7b (above) already
+          // owns this with a real fix — skip so it isn't also review-flagged
+          // once per extra <h1>.
+          if (is.category === 'Headings' && /Multiple h1/.test(is.msg)) return;
+          // lang attribute: this section's own check #8b (above) already
+          // owns this with a real fix.
+          if (is.category === 'Structure' && /lang attribute/.test(is.msg)) return;
           if (!is.el) { if (is.severity !== 'info') reviews.push({ category: is.category, el: null, label: is.msg }); return; }
           if (is.fix === 'add-empty-alt') {
             fixes.push({ id: fid(), category: 'Accessibility', label: `Decorative image → alt="" — "${is.msg.slice(0, 40)}"`,
@@ -685,7 +766,10 @@
             // The visible new-tab icon on these links isn't itself
             // accessible text — a screen reader announces nothing extra
             // for it. Adds a visually-hidden note so the warning is heard
-            // without changing what's visually on the page.
+            // without changing what's visually on the page. Skip inside a
+            // Creator+ embed: .visually-hidden's CSS is stripped there, so
+            // the note would render as visible text instead of staying hidden.
+            if (isInCreatorPlus(is.el)) return;
             fixes.push({ id: fid(), category: 'Links', label: `Add "(opens in a new tab)" note: "${is.el.textContent.trim().slice(0, 30)}"`,
               apply: () => { const span = tinyDoc.createElement('span'); span.className = 'visually-hidden'; span.textContent = ' (opens in a new tab)'; is.el.appendChild(span); } });
           } else if (is.severity !== 'info') {
