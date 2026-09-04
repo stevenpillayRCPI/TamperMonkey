@@ -5,7 +5,7 @@
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      5.7
+// @version      5.6
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -110,6 +110,152 @@
       return false;
     }
   }
+
+  // ─── SAVE & NEXT (TOC-based navigation) ─────────────────────────────────────
+  // Walks the LE content API (root + module structure, recursively) to build a
+  // flat pre-order list matching Lessons TOC display order, finds the current
+  // topic in it, and jumps straight to the next item's edit URL — skipping the
+  // save → exit to view → click next → re-enter edit loop.
+  //
+  // Every /content/modules/{id}/structure/ fetch returns its direct children
+  // already fully resolved — topics carry TopicType + Url inline, so no extra
+  // per-topic fetch is needed (confirmed via devtools). Container edit URLs use
+  // loadUnit for depth 0, loadActivity/lesson for depth 1, loadActivity/folder
+  // for depth 2+ (confirmed folder-in-folder still uses "folder").
+  function initSaveAndNext() {
+    const _fetch = window.fetch.bind(window);
+    const TOC_CACHE_KEY = 'bb-toc-cache-v1';
+    const TOC_CACHE_TTL_MS = 5 * 60 * 1000;
+
+    function getOu() {
+      const m = location.pathname.match(/\/lessons\/(\d+)\//);
+      return m ? m[1] : null;
+    }
+
+    function currentTopicId() {
+      const m = location.pathname.match(/\/loadActivity\/file\/(\d+)/);
+      return m ? m[1] : null;
+    }
+
+    async function getJson(url) {
+      const res = await _fetch(url, { credentials: 'include', headers: { Accept: 'application/json' } });
+      if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
+      return res.json();
+    }
+
+    async function buildToc(ou) {
+      const ver = 'unstable';
+      const list = [];
+      async function walk(items, depth) {
+        for (const item of items) {
+          if (item.Type === 1) {
+            list.push({ id: item.Id, kind: 'topic', topicType: item.TopicType ?? null, parentModuleId: item.ParentModuleId ?? null });
+          } else if (item.Type === 0) {
+            list.push({ id: item.Id, kind: 'container', depth, parentModuleId: item.ParentModuleId ?? null });
+            const kids = await getJson(`/d2l/api/le/${ver}/${ou}/content/modules/${item.Id}/structure/`);
+            await walk(kids, depth + 1);
+          }
+        }
+      }
+      const root = await getJson(`/d2l/api/le/${ver}/${ou}/content/root/`);
+      await walk(root, 0);
+      return list;
+    }
+
+    async function getToc(ou) {
+      try {
+        const cached = JSON.parse(GM_getValue(TOC_CACHE_KEY, 'null'));
+        if (cached && cached.ou === ou && (Date.now() - cached.ts) < TOC_CACHE_TTL_MS) return cached.list;
+      } catch {}
+      const list = await buildToc(ou);
+      try { GM_setValue(TOC_CACHE_KEY, JSON.stringify({ ou, ts: Date.now(), list })); } catch {}
+      return list;
+    }
+
+    function buildUrl(lessonsId, node) {
+      if (node.kind === 'topic') {
+        // Anything other than a file topic (quiz, discussion, etc.) uses an
+        // opaque activity token for its edit URL — can't be constructed, so
+        // land on its view page instead.
+        if (node.topicType !== 1) return `https://brightspace.rcpi.ie/d2l/le/lessons/${lessonsId}/topics/${node.id}`;
+        return `https://brightspace.rcpi.ie/d2l/le/lessons/${lessonsId}/edit/${node.parentModuleId}/loadActivity/file/${node.id}?isNew=false`;
+      }
+      if (node.depth === 0) return `https://brightspace.rcpi.ie/d2l/le/lessons/${lessonsId}/edit/loadUnit/${node.id}`;
+      const kindSeg = node.depth === 1 ? 'lesson' : 'folder';
+      return `https://brightspace.rcpi.ie/d2l/le/lessons/${lessonsId}/edit/${node.parentModuleId}/loadActivity/${kindSeg}/${node.id}?isNew=false`;
+    }
+
+    function findSaveButton() {
+      const buttonsHost = document.querySelector('d2l-activity-editor-buttons');
+      const buttons = buttonsHost?.shadowRoot?.querySelectorAll('d2l-button');
+      if (!buttons) return null;
+      for (const btn of buttons) {
+        if (btn.textContent?.trim().toLowerCase() === 'save') return btn;
+      }
+      return null;
+    }
+
+    // Resolves once the "Saved successfully" toast (d2l-alert type="success"
+    // losing its hidden attribute) appears, or after a timeout so a missed
+    // toast never blocks navigation.
+    function waitForSaveToast(timeoutMs = 6000) {
+      return new Promise(resolve => {
+        let done = false;
+        const finish = () => { if (!done) { done = true; obs.disconnect(); resolve(); } };
+        const obs = new MutationObserver(muts => {
+          for (const m of muts) {
+            if (m.attributeName === 'hidden') {
+              const el = m.target;
+              if (el.tagName?.toLowerCase() === 'd2l-alert' && el.getAttribute('type') === 'success' && !el.hasAttribute('hidden')) {
+                finish();
+                return;
+              }
+            }
+          }
+        });
+        obs.observe(document.body, { attributes: true, attributeFilter: ['hidden'], subtree: true });
+        setTimeout(finish, timeoutMs);
+      });
+    }
+
+    async function saveAndNext(btn) {
+      const ou = getOu();
+      const topicId = currentTopicId();
+      if (!ou || !topicId) { toast('Could not identify this page', 'error'); return; }
+
+      const origLabel = btn.textContent;
+      const reset = () => { btn.disabled = false; btn.textContent = origLabel; };
+      btn.disabled = true;
+      btn.textContent = '⏳ Loading TOC…';
+
+      let toc;
+      try {
+        toc = await getToc(ou);
+      } catch (e) {
+        dbg('Save & Next: TOC fetch failed', e);
+        toast('Could not load course structure', 'error');
+        reset();
+        return;
+      }
+
+      const idx = toc.findIndex(n => n.kind === 'topic' && String(n.id) === String(topicId));
+      if (idx === -1) { toast('Current page not found in course structure', 'warn'); reset(); return; }
+      if (idx === toc.length - 1) { toast('Already on the last item', 'warn'); reset(); return; }
+      const nextUrl = buildUrl(ou, toc[idx + 1]);
+
+      const saveBtn = findSaveButton();
+      if (!saveBtn) { toast('Save button not found', 'error'); reset(); return; }
+      btn.textContent = '⏳ Saving…';
+      saveBtn.click();
+      await waitForSaveToast();
+
+      location.href = nextUrl;
+    }
+
+    return { saveAndNext };
+  }
+
+  const SaveNext = initSaveAndNext();
 
   // ─── STATE ─────────────────────────────────────────────────────────────────
   let tinyDoc = null;       // TinyMCE iframe document
@@ -257,16 +403,6 @@
       }
     } catch {}
     return s.replace(/[^a-zA-Z0-9_-]/g, ch => '\\' + ch);
-  }
-
-  // Detect a Brightspace Creator+ embed / TinyMCE noneditable region. These
-  // strip or scope out our CSS and classes, so fixes whose only effect comes
-  // from a CSS class (e.g. a .visually-hidden span) must not be applied
-  // inside one — the "hidden" text would render visible instead.
-  function isInCreatorPlus(el) {
-    return !!(el && el.closest && el.closest(
-      '[class*="d2l-element"], [class^="d2l-cplus"], [class*=" d2l-cplus"], .mceNonEditable'
-    ));
   }
 
   function copyToClipboard(html) {
@@ -539,58 +675,6 @@
       });
     }
 
-    // 7b. Multiple <h1> elements: only one per page. Keep the first, downgrade
-    // the rest to <h2> (the heading-hierarchy check above then catches any
-    // resulting skip on a re-run).
-    {
-      const h1s = Array.from(body.querySelectorAll('h1'));
-      if (h1s.length > 1) {
-        const extra = h1s.slice(1);
-        fixes.push({
-          id: fid(), category: 'Accessibility',
-          label: `${extra.length} extra <h1>(s) found → downgrade to <h2> (first one kept)`,
-          apply: () => {
-            extra.forEach(h => {
-              const repl = tinyDoc.createElement('h2');
-              for (const a of Array.from(h.attributes)) repl.setAttribute(a.name, a.value);
-              while (h.firstChild) repl.appendChild(h.firstChild);
-              h.replaceWith(repl);
-            });
-          }
-        });
-      }
-    }
-
-    // 7c. Links to PDF files should say so in the link text. If some form of
-    // "pdf" is already present, normalise it to the standard "[PDF]" marker
-    // instead of appending a second one.
-    body.querySelectorAll('a[href]').forEach(a => {
-      const href = a.getAttribute('href') || '';
-      if (!/\.pdf(?:[?#]|$)/i.test(href)) return;
-      const text = (a.textContent || '').trim();
-      if (!text || /\[PDF\]$/.test(text)) return;
-      const hasPdfMention = /pdf/i.test(text);
-      fixes.push({
-        id: fid(), category: 'Links',
-        label: (hasPdfMention ? 'Standardise PDF mention → "[PDF]": "' : 'Add "[PDF]" to link text: "') + text.slice(0, 30) + '"',
-        apply: () => {
-          if (hasPdfMention) {
-            const walker = tinyDoc.createTreeWalker(a, NodeFilter.SHOW_TEXT);
-            let node;
-            while ((node = walker.nextNode())) {
-              if (/pdf/i.test(node.nodeValue)) {
-                node.nodeValue = node.nodeValue.replace(/\(?\s*pdf\s*\)?/i, '[PDF]');
-                return;
-              }
-            }
-            a.appendChild(tinyDoc.createTextNode(' [PDF]'));
-          } else {
-            a.appendChild(tinyDoc.createTextNode(' [PDF]'));
-          }
-        }
-      });
-    });
-
     // 8. Table accessibility: missing <caption>; header row not using
     // <th scope="col">; first-column row headers not using <th scope="row">.
     body.querySelectorAll('table').forEach(tbl => {
@@ -654,18 +738,6 @@
         }
       }
     });
-
-    // 8b. Missing lang attribute on the page's <html> element → default to English.
-    {
-      const htmlEl = body.ownerDocument && body.ownerDocument.documentElement;
-      if (htmlEl && !htmlEl.getAttribute('lang')) {
-        fixes.push({
-          id: fid(), category: 'Structure',
-          label: 'No lang attribute on the page → set lang="en"',
-          apply: () => { htmlEl.setAttribute('lang', 'en'); }
-        });
-      }
-    }
 
     // 9. Link-text quality (review only): vague link text or bare URLs.
     body.querySelectorAll('a[href]').forEach(a => {
@@ -746,13 +818,6 @@
           // is the header row, etc.) that the shared engine can't see —
           // skip here so the same table doesn't get flagged twice.
           if (is.category === 'Tables') return;
-          // Multiple <h1>s: this section's own check #7b (above) already
-          // owns this with a real fix — skip so it isn't also review-flagged
-          // once per extra <h1>.
-          if (is.category === 'Headings' && /Multiple h1/.test(is.msg)) return;
-          // lang attribute: this section's own check #8b (above) already
-          // owns this with a real fix.
-          if (is.category === 'Structure' && /lang attribute/.test(is.msg)) return;
           if (!is.el) { if (is.severity !== 'info') reviews.push({ category: is.category, el: null, label: is.msg }); return; }
           if (is.fix === 'add-empty-alt') {
             fixes.push({ id: fid(), category: 'Accessibility', label: `Decorative image → alt="" — "${is.msg.slice(0, 40)}"`,
@@ -766,10 +831,7 @@
             // The visible new-tab icon on these links isn't itself
             // accessible text — a screen reader announces nothing extra
             // for it. Adds a visually-hidden note so the warning is heard
-            // without changing what's visually on the page. Skip inside a
-            // Creator+ embed: .visually-hidden's CSS is stripped there, so
-            // the note would render as visible text instead of staying hidden.
-            if (isInCreatorPlus(is.el)) return;
+            // without changing what's visually on the page.
             fixes.push({ id: fid(), category: 'Links', label: `Add "(opens in a new tab)" note: "${is.el.textContent.trim().slice(0, 30)}"`,
               apply: () => { const span = tinyDoc.createElement('span'); span.className = 'visually-hidden'; span.textContent = ' (opens in a new tab)'; is.el.appendChild(span); } });
           } else if (is.severity !== 'info') {
@@ -1597,6 +1659,7 @@
             <button id="bb-tk-replace" class="bb-btn bb-btn-goto" style="margin:0 0 8px;">🔎 Find &amp; replace</button>
             <button id="bb-tk-citations" class="bb-btn bb-btn-goto" style="margin:0 0 8px;">📎 Link DOI / PMID citations</button>
             <button id="bb-tk-audit-launch" class="bb-btn bb-btn-goto" style="margin:0 0 8px;">🔍 Open Content Audit (view mode)</button>
+            <button id="bb-tk-save-next" class="bb-btn bb-btn-goto" style="margin:0 0 8px;" title="Save this page and jump straight to the next item in the course TOC">➡️ Save &amp; Next</button>
             <div id="bb-tk-audit-banner" style="display:none;"></div>
             <div id="bb-tk-wordcount" class="bb-wordcount" title="Words / reading time in the editor content">—</div>
             <div class="bb-tk-toolrow">
@@ -1647,6 +1710,9 @@
     }
 
     injectPanelStyles();
+
+    const saveNextBtn = panel.querySelector('#bb-tk-save-next');
+    if (saveNextBtn) saveNextBtn.addEventListener('click', () => SaveNext.saveAndNext(saveNextBtn));
 
     // Insert-row-at-cursor button — opens the colour menu near the panel button,
     // inserting at wherever the caret currently sits in the editor.
