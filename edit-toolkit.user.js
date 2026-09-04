@@ -5,7 +5,7 @@
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      5.8
+// @version      6.4
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -133,8 +133,10 @@
     }
 
     function currentTopicId() {
-      const m = location.pathname.match(/\/loadActivity\/file\/(\d+)/);
-      return m ? m[1] : null;
+      const m = location.pathname.match(/\/loadActivity\/(?:file|lesson|folder)\/(\d+)/);
+      if (m) return m[1];
+      const u = location.pathname.match(/\/loadUnit\/(\d+)/);
+      return u ? u[1] : null;
     }
 
     async function getJson(url) {
@@ -186,36 +188,27 @@
     }
 
     function findSaveButton() {
-      const buttonsHost = document.querySelector('d2l-activity-editor-buttons');
+      // The buttons host can sit inside another component's shadow root on
+      // existing (non-new) pages — a plain querySelector can't pierce that,
+      // so search recursively through every shadow root.
+      function deepQuery(root, selector) {
+        const hit = root.querySelector(selector);
+        if (hit) return hit;
+        for (const el of root.querySelectorAll('*')) {
+          if (el.shadowRoot) {
+            const r = deepQuery(el.shadowRoot, selector);
+            if (r) return r;
+          }
+        }
+        return null;
+      }
+      const buttonsHost = deepQuery(document, 'd2l-activity-editor-buttons');
       const buttons = buttonsHost?.shadowRoot?.querySelectorAll('d2l-button');
       if (!buttons) return null;
       for (const btn of buttons) {
         if (btn.textContent?.trim().toLowerCase() === 'save') return btn;
       }
       return null;
-    }
-
-    // Resolves once the "Saved successfully" toast (d2l-alert type="success"
-    // losing its hidden attribute) appears, or after a timeout so a missed
-    // toast never blocks navigation.
-    function waitForSaveToast(timeoutMs = 6000) {
-      return new Promise(resolve => {
-        let done = false;
-        const finish = () => { if (!done) { done = true; obs.disconnect(); resolve(); } };
-        const obs = new MutationObserver(muts => {
-          for (const m of muts) {
-            if (m.attributeName === 'hidden') {
-              const el = m.target;
-              if (el.tagName?.toLowerCase() === 'd2l-alert' && el.getAttribute('type') === 'success' && !el.hasAttribute('hidden')) {
-                finish();
-                return;
-              }
-            }
-          }
-        });
-        obs.observe(document.body, { attributes: true, attributeFilter: ['hidden'], subtree: true });
-        setTimeout(finish, timeoutMs);
-      });
     }
 
     async function saveAndNext(btn) {
@@ -238,7 +231,7 @@
         return;
       }
 
-      const idx = toc.findIndex(n => n.kind === 'topic' && String(n.id) === String(topicId));
+      const idx = toc.findIndex(n => String(n.id) === String(topicId));
       if (idx === -1) { toast('Current page not found in course structure', 'warn'); reset(); return; }
       if (idx === toc.length - 1) { toast('Already on the last item', 'warn'); reset(); return; }
       const nextUrl = buildUrl(ou, toc[idx + 1]);
@@ -247,7 +240,7 @@
       if (!saveBtn) { toast('Save button not found', 'error'); reset(); return; }
       btn.textContent = '⏳ Saving…';
       saveBtn.click();
-      await waitForSaveToast();
+      await new Promise(r => setTimeout(r, 2000));
 
       location.href = nextUrl;
     }
@@ -586,6 +579,15 @@
       });
     });
 
+    // 3. "Open All" on transcript accordion.
+    body.querySelectorAll('.accordion.transcript').forEach(acc => {
+      const btn = acc.parentElement && acc.parentElement.querySelector('.accordion-toggle-button');
+      if (btn) fixes.push({
+        id: fid(), category: 'Structure',
+        label: 'Remove "Open All" from a transcript accordion',
+        apply: () => { (btn.closest('.d-flex.justify-content-end') || btn).remove(); }
+      });
+    });
     // 4. Carousel desync.
     body.querySelectorAll('.text-carousel, .image-carousel').forEach(car => {
       const wrapper = car.classList.contains('carousel') ? car : car.querySelector('.carousel');
@@ -675,6 +677,58 @@
       });
     }
 
+    // 7b. Multiple <h1> elements: only one per page. Keep the first, downgrade
+    // the rest to <h2> (the heading-hierarchy check above then catches any
+    // resulting skip on a re-run).
+    {
+      const h1s = Array.from(body.querySelectorAll('h1'));
+      if (h1s.length > 1) {
+        const extra = h1s.slice(1);
+        fixes.push({
+          id: fid(), category: 'Accessibility',
+          label: `${extra.length} extra <h1>(s) found → downgrade to <h2> (first one kept)`,
+          apply: () => {
+            extra.forEach(h => {
+              const repl = tinyDoc.createElement('h2');
+              for (const a of Array.from(h.attributes)) repl.setAttribute(a.name, a.value);
+              while (h.firstChild) repl.appendChild(h.firstChild);
+              h.replaceWith(repl);
+            });
+          }
+        });
+      }
+    }
+
+    // 7c. Links to PDF files should say so in the link text. If some form of
+    // "pdf" is already present, normalise it to the standard "[PDF]" marker
+    // instead of appending a second one.
+    body.querySelectorAll('a[href]').forEach(a => {
+      const href = a.getAttribute('href') || '';
+      if (!/\.pdf(?:[?#]|$)/i.test(href)) return;
+      const text = (a.textContent || '').trim();
+      if (!text || /\[PDF\]$/.test(text)) return;
+      const hasPdfMention = /pdf/i.test(text);
+      fixes.push({
+        id: fid(), category: 'Links',
+        label: (hasPdfMention ? 'Standardise PDF mention → "[PDF]": "' : 'Add "[PDF]" to link text: "') + text.slice(0, 30) + '"',
+        apply: () => {
+          if (hasPdfMention) {
+            const walker = tinyDoc.createTreeWalker(a, NodeFilter.SHOW_TEXT);
+            let node;
+            while ((node = walker.nextNode())) {
+              if (/pdf/i.test(node.nodeValue)) {
+                node.nodeValue = node.nodeValue.replace(/\(?\s*pdf\s*\)?/i, '[PDF]');
+                return;
+              }
+            }
+            a.appendChild(tinyDoc.createTextNode(' [PDF]'));
+          } else {
+            a.appendChild(tinyDoc.createTextNode(' [PDF]'));
+          }
+        }
+      });
+    });
+
     // 8. Table accessibility: missing <caption>; header row not using
     // <th scope="col">; first-column row headers not using <th scope="row">.
     body.querySelectorAll('table').forEach(tbl => {
@@ -738,6 +792,18 @@
         }
       }
     });
+
+    // 8b. Missing lang attribute on the page's <html> element → default to English.
+    {
+      const htmlEl = body.ownerDocument && body.ownerDocument.documentElement;
+      if (htmlEl && !htmlEl.getAttribute('lang')) {
+        fixes.push({
+          id: fid(), category: 'Structure',
+          label: 'No lang attribute on the page → set lang="en"',
+          apply: () => { htmlEl.setAttribute('lang', 'en'); }
+        });
+      }
+    }
 
     // 9. Link-text quality (review only): vague link text or bare URLs.
     body.querySelectorAll('a[href]').forEach(a => {
@@ -818,6 +884,13 @@
           // is the header row, etc.) that the shared engine can't see —
           // skip here so the same table doesn't get flagged twice.
           if (is.category === 'Tables') return;
+          // Multiple <h1>s: this section's own check #7b (above) already
+          // owns this with a real fix — skip so it isn't also review-flagged
+          // once per extra <h1>.
+          if (is.category === 'Headings' && /Multiple h1/.test(is.msg)) return;
+          // lang attribute: this section's own check #8b (above) already
+          // owns this with a real fix.
+          if (is.category === 'Structure' && /lang attribute/.test(is.msg)) return;
           if (!is.el) { if (is.severity !== 'info') reviews.push({ category: is.category, el: null, label: is.msg }); return; }
           if (is.fix === 'add-empty-alt') {
             fixes.push({ id: fid(), category: 'Accessibility', label: `Decorative image → alt="" — "${is.msg.slice(0, 40)}"`,
@@ -918,7 +991,7 @@
         });
       });
     }
-    html += `<div class="bb-fix-actions"><button id="bb-fix-apply" class="bb-btn bb-btn-img">Apply ticked fixes</button> <button id="bb-fix-cancel" class="bb-btn bb-btn-goto">Close</button></div>`;
+    html += `<div class="bb-fix-actions"><button id="bb-fix-apply" class="bb-btn bb-btn-img">Apply ticked fixes</button> <button id="bb-fix-apply-next" class="bb-btn bb-btn-img" title="Apply ticked fixes, save this page, and jump to the next item in the course TOC">✅➡️ Apply, save &amp; next</button> <button id="bb-fix-cancel" class="bb-btn bb-btn-goto">Close</button></div>`;
 
     showModal('Page check & fix', html);
 
@@ -936,24 +1009,45 @@
     const cancel = modal.querySelector('#bb-fix-cancel');
     if (cancel) cancel.addEventListener('click', () => modal.remove());
 
-    const applyBtn = modal.querySelector('#bb-fix-apply');
-    if (applyBtn) applyBtn.addEventListener('click', () => {
+    // Shared by both action buttons: applies whichever fixes are ticked and
+    // returns how many were attempted plus whether the write succeeded.
+    function applyTickedFixes() {
       const chosen = new Set();
       modal.querySelectorAll('.bb-fix-chk:checked').forEach(c => chosen.add(c.getAttribute('data-fix')));
       const toApply = fixes.filter(f => chosen.has(f.id));
-      if (!toApply.length) { toast('No fixes ticked', 'warn'); modal.remove(); return; }
+      if (!toApply.length) return { applied: 0, ok: true };
       const didWrite = tinyWrite((ed) => {
         const b = ed.getBody();
         toApply.forEach(f => { try { f.apply(b); } catch (err) { dbg('fix failed', f.label, err); } });
       }, 'apply page fixes', { ungated: true });
+      return { applied: toApply.length, ok: didWrite };
+    }
+
+    const applyBtn = modal.querySelector('#bb-fix-apply');
+    if (applyBtn) applyBtn.addEventListener('click', () => {
+      const { applied, ok } = applyTickedFixes();
       modal.remove();
-      if (didWrite) {
-        toast(`✓ Applied ${toApply.length} fix${toApply.length > 1 ? 'es' : ''}`, 'success');
+      if (!applied) { toast('No fixes ticked', 'warn'); return; }
+      if (ok) {
+        toast(`✓ Applied ${applied} fix${applied > 1 ? 'es' : ''}`, 'success');
         scheduleAudit();
         refreshComponentList();
       } else {
         toast('Editor API unavailable — could not apply', 'error');
       }
+    });
+
+    const applyNextBtn = modal.querySelector('#bb-fix-apply-next');
+    if (applyNextBtn) applyNextBtn.addEventListener('click', () => {
+      const { applied, ok } = applyTickedFixes();
+      if (applied && !ok) { toast('Editor API unavailable — could not apply fixes', 'error'); return; }
+      if (applied) {
+        toast(`✓ Applied ${applied} fix${applied > 1 ? 'es' : ''} — saving & moving on`, 'success');
+        scheduleAudit();
+        refreshComponentList();
+      }
+      modal.remove();
+      SaveNext.saveAndNext(applyNextBtn);
     });
   }
 
@@ -5879,13 +5973,13 @@ function addParagraphToRow(rowEl) {
       .bb-snap-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 0; border-bottom: 1px solid #f1f5fb; font-size: 13px; }
       .bb-snip-divider { font-weight: 700; color: #002d72; margin: 14px 0 4px; padding-top: 10px; border-top: 1px solid #e5e9f0; }
       .bb-btn {
-        padding: 3px 8px; border-radius: 4px; border: 1px solid;
-        cursor: pointer; font-size: 11px; white-space: nowrap;
+        padding: 6px 12px; border-radius: 4px; border: 1px solid;
+        cursor: pointer; font-size: 14px; white-space: nowrap;
       }
       .bb-btn-plus  { background: #002d72; color: #fff; border-color: #002d72; }
       .bb-btn-fix   { background: #b3541e; color: #fff; border-color: #b3541e; font-size: 15px; font-weight: 600; padding: 10px 12px; }
       .bb-btn-goto  { background: #fff; color: #6e7477; border-color: #cdd5dc; }
-      .bb-btn-img   { background: #6f42c1; color: #fff; border-color: #6f42c1; font-size: 11px; }
+      .bb-btn-img   { background: #6f42c1; color: #fff; border-color: #6f42c1; }
       .bb-audit-row {
         display: flex; align-items: flex-start; gap: 6px;
         padding: 4px 2px; border-bottom: 1px solid #f1f5fb;
