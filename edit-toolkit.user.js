@@ -5,7 +5,7 @@
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      6.7
+// @version      6.9
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -5241,6 +5241,18 @@ function addParagraphToRow(rowEl) {
 
   // ─── SHARED MENU HELPERS ────────────────────────────────────────────────────
   function positionMenu(menu, x, y, absolute) {
+    // Small × button, top-right, as a backup way to dismiss the menu — the
+    // outside-click listener sometimes fails to fire (e.g. on focus loss).
+    if (!menu.querySelector('.bb-ctx-close')) {
+      const closeBtn = document.createElement('button');
+      closeBtn.className = 'bb-ctx-close';
+      closeBtn.type = 'button';
+      closeBtn.setAttribute('aria-label', 'Close menu');
+      closeBtn.textContent = '×';
+      closeBtn.addEventListener('click', (e) => { e.stopPropagation(); closeAnyMenu(); });
+      menu.appendChild(closeBtn);
+    }
+
     // Compute the intended page coordinates.
     let px, py;
     if (absolute) {
@@ -5289,7 +5301,7 @@ function addParagraphToRow(rowEl) {
   const BB_MENU_IDS = ['bb-row-menu', 'bb-insertrow-menu', 'bb-insertcomponent-menu', 'bb-wrap-menu', 'bb-image-menu',
     'bb-component-menu', 'bb-convert-menu', 'bb-table-menu', 'bb-icon-menu',
     'bb-pdf-menu', 'bb-youtube-menu', 'bb-link-menu', 'bb-pdf-embed-menu', 'bb-card-menu',
-    'bb-animated-icon-menu'];
+    'bb-animated-icon-menu', 'bb-iframe-menu', 'bb-wrapin-menu'];
 
   // Close all BB context menus. When invoked from a document click we receive the
   // event: if that click landed *inside* one of our menus (e.g. on a button that
@@ -6261,8 +6273,16 @@ function addParagraphToRow(rowEl) {
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       }
       #bb-col-menu .bb-col-menu-title, .bb-ctx-menu .bb-ctx-title {
-        font-size: 12px; color: #6e7477; padding: 5px 9px 7px; font-weight: 600;
+        font-size: 12px; color: #6e7477; padding: 5px 24px 7px 9px; font-weight: 600;
       }
+      .bb-ctx-menu button.bb-ctx-close {
+        position: absolute; top: 4px; right: 4px;
+        width: 20px; height: 20px; min-width: 0; padding: 0;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 16px; line-height: 1; font-weight: 400;
+        color: #6e7477; background: transparent; border-radius: 4px; z-index: 1;
+      }
+      .bb-ctx-menu button.bb-ctx-close:hover { background: #eef1f3; color: #1c2024; }
       #bb-col-menu button, .bb-ctx-menu button {
         display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
         background: none; border: none; border-radius: 4px;
