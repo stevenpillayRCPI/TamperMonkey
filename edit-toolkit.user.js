@@ -5,7 +5,7 @@
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      6.10
+// @version      6.11
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -1646,6 +1646,15 @@
 <textarea class="reflection-text" placeholder="Enter your text here..."></textarea> <button class="save-reflection">Save to Word Document</button></div></div></div></div></div>`);
   }
 
+  function shellReflectionContentOnly() {
+    return TPL.wrapRow(`<div class="col-12"><div contenteditable="true"><div class="reflection">
+<p>Prompt</p>
+<p><em>You may use the box below to write and export your thoughts.</em></p>
+<p><em>Note: Your response will not be submitted, viewed, or graded.</em></p>
+<textarea class="reflection-text" placeholder="Enter your text here..."></textarea> <button class="save-reflection">Save to Word Document</button>
+<p>Content</p></div></div></div>`);
+  }
+
   // The insertable library, grouped by category for the menu. `build` returns
   // a full ready-to-insert row (see shell functions above).
   const INSERT_LIBRARY = [
@@ -1687,6 +1696,7 @@
 
     { category: 'Interactive', label: 'Click and Reveal',              build: shellClickAndReveal },
     { category: 'Interactive', label: 'Reflection',                    build: shellReflection },
+    { category: 'Interactive', label: 'Reflection (content only)',     build: shellReflectionContentOnly },
   ];
 
   // ─── ADD-ITEM LOGIC ─────────────────────────────────────────────────────────
