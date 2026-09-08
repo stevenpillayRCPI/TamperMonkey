@@ -5,7 +5,7 @@
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      6.6
+// @version      6.7
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -109,6 +109,15 @@
       dbg('tinyWrite threw:', label, err);
       return false;
     }
+  }
+
+  // Walk up from `node` to find the direct child of `container` that contains
+  // it (e.g. the top-level block inside a row's .editable-row-content). Shared
+  // by splitRowAt and the row menu's "insert component at clicked block".
+  function directChildOf(container, node) {
+    let el = node;
+    while (el && el.parentElement && el.parentElement !== container) el = el.parentElement;
+    return (el && el.parentElement === container) ? el : null;
   }
 
   // ─── SAVE & NEXT (TOC-based navigation) ─────────────────────────────────────
@@ -2865,7 +2874,7 @@
     else toast('Copied, but could not remove — editor API unavailable', 'warn');
   }
 
-  function appendComponentUtilityItems(menu, el) {
+  function appendComponentUtilityItems(menu, el, x, y) {
     const sep = document.createElement('div');
     sep.className = 'bb-ctx-sub';
     sep.textContent = 'Position / clipboard';
@@ -2882,6 +2891,27 @@
     add('⤓ Insert <br> below', () => insertBrAdjacent(el, 'after'));
     add('⧉ Copy component (clean)', () => copyElementClean(el), 'Copies just this component — no row wrapper or guard divs');
     add('✂ Cut component (clean)', () => cutElementClean(el));
+
+    const sep2 = document.createElement('div');
+    sep2.className = 'bb-ctx-sub';
+    sep2.textContent = 'Insert another component';
+    menu.appendChild(sep2);
+    const btnAfter = document.createElement('button');
+    btnAfter.textContent = '▸ Insert component after this…';
+    btnAfter.title = 'Adds a new component from the library directly after this one, in the same parent';
+    btnAfter.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openInsertComponentMenu(x, y, null, null, false, el);
+    });
+    menu.appendChild(btnAfter);
+    const btnWrap = document.createElement('button');
+    btnWrap.textContent = '▤ Wrap in…';
+    btnWrap.title = 'Moves this component into the content area of a chosen library shell (card, accordion, etc.)';
+    btnWrap.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openWrapInMenu(el, x, y);
+    });
+    menu.appendChild(btnWrap);
   }
 
   function openComponentMenu(compEl, tgt, x, y) {
@@ -2969,7 +2999,7 @@
       });
     }
 
-    appendComponentUtilityItems(menu, compEl);
+    appendComponentUtilityItems(menu, compEl, x, y);
     positionMenu(menu, x, y);
   }
 
@@ -4193,6 +4223,23 @@
     addParaBtn.addEventListener('click', () => { addParagraphToRow(rowEl); closeAnyMenu(); });
     menu.appendChild(addParaBtn);
 
+    // Insert a library component right after the clicked block (i.e. "at
+    // cursor position") rather than as a whole new row.
+    const editableForInsert = rowEl.querySelector('.editable-row-content');
+    const clickedBlock = editableForInsert ? directChildOf(editableForInsert, tgt) : null;
+    if (clickedBlock) {
+      const insertHereBtn = document.createElement('button');
+      insertHereBtn.textContent = '▸ Insert component at clicked block…';
+      insertHereBtn.title = 'Adds a library component right after the block you clicked, within this row';
+      insertHereBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const cur = document.getElementById('bb-row-menu');
+        if (cur) cur.remove();
+        openInsertComponentMenu(x, y, null, null, false, clickedBlock);
+      });
+      menu.appendChild(insertHereBtn);
+    }
+
     // Insert a PDF embed into this row's content.
     const pdfBtn = document.createElement('button');
     pdfBtn.textContent = '📄 Embed PDF…';
@@ -4653,14 +4700,14 @@ function addParagraphToRow(rowEl) {
   // Component library menu: grouped by category. Reuses the same anchor/position
   // targeting as openInsertRowMenu so the component lands in the same spot the
   // row-colour menu would have inserted an empty row.
-  function openInsertComponentMenu(x, y, anchorRow, position, absolute) {
+  function openInsertComponentMenu(x, y, anchorRow, position, absolute, siblingTarget) {
     closeAnyMenu();
-    dbg('openInsertComponentMenu. anchorRow=', !!anchorRow, 'position=', position);
+    dbg('openInsertComponentMenu. anchorRow=', !!anchorRow, 'position=', position, 'siblingTarget=', !!siblingTarget);
 
     const menu = document.createElement('div');
     menu.id = 'bb-insertcomponent-menu';
     menu.className = 'bb-ctx-menu';
-    menu.innerHTML = `<div class="bb-ctx-title">Insert component</div>`;
+    menu.innerHTML = `<div class="bb-ctx-title">${siblingTarget ? 'Insert component after this' : 'Insert component'}</div>`;
 
     let lastCategory = null;
     INSERT_LIBRARY.forEach(entry => {
@@ -4674,7 +4721,8 @@ function addParagraphToRow(rowEl) {
       const btn = document.createElement('button');
       btn.textContent = entry.label;
       btn.addEventListener('click', () => {
-        insertComponent(entry, anchorRow, position);
+        if (siblingTarget) insertComponentAfterElement(entry, siblingTarget);
+        else insertComponent(entry, anchorRow, position);
         closeAnyMenu();
       });
       menu.appendChild(btn);
@@ -4729,6 +4777,79 @@ function addParagraphToRow(rowEl) {
     }
     copyToClipboard(html);
     toast(`✓ ${entry.label} copied — paste where you want it`, 'warn');
+  }
+
+  // Extract just the actual component from a library shell's built row HTML
+  // (drops the .row / deletion-guard / .editable-row-content wrapper), so it
+  // can be dropped in as a sibling of an existing element rather than as a
+  // new top-level row.
+  function extractShellComponent(html) {
+    const tmp = tinyDoc.createElement('div');
+    tmp.innerHTML = html.trim();
+    const newRow = tmp.firstElementChild;
+    const editable = newRow && newRow.querySelector('.editable-row-content');
+    return (editable && editable.firstElementChild) || newRow;
+  }
+
+  // Insert a library component as the next sibling of targetEl, in whatever
+  // parent targetEl already lives in — so inserting after a card nested
+  // inside another card stays nested inside that card, not a new top row.
+  function insertComponentAfterElement(entry, targetEl) {
+    const html = entry.build();
+    const didWrite = tinyWrite(() => {
+      const component = extractShellComponent(html);
+      targetEl.parentNode.insertBefore(component, targetEl.nextSibling);
+    }, 'insertComponentAfterElement ' + entry.label, { ungated: true });
+    if (didWrite) { toast(`✓ ${entry.label} inserted after component`, 'success'); scheduleAudit(); refreshComponentList(); }
+    else toast('Editor API unavailable', 'warn');
+  }
+
+  // ─── WRAP EXISTING COMPONENT IN A LIBRARY SHELL ─────────────────────────────
+  // Builds a fresh shell (card, accordion, etc.), finds its innermost editable
+  // content slot (the deepest [contenteditable="true"] with no nested
+  // contenteditable region of its own — every shell's actual content area),
+  // and moves the clicked element's content into that slot in place of the
+  // shell's own placeholder content. Multi-slot shells (columns, tabs,
+  // carousels) only get their first slot filled; the rest keep their default
+  // placeholder content and can be edited normally afterwards.
+  function wrapElementInShell(el, entry) {
+    const html = entry.build();
+    const didWrite = tinyWrite(() => {
+      const component = extractShellComponent(html);
+      const regions = [...component.querySelectorAll('[contenteditable="true"]')];
+      const slot = regions.find(r => !r.querySelector('[contenteditable="true"]')) || component;
+      const clone = el.cloneNode(true);
+      slot.innerHTML = '';
+      slot.appendChild(clone);
+      el.parentNode.replaceChild(component, el);
+    }, 'wrapElementInShell ' + entry.label, { ungated: true });
+    if (didWrite) { toast(`✓ Wrapped in ${entry.label}`, 'success'); scheduleAudit(); refreshComponentList(); }
+    else toast('Editor API unavailable', 'warn');
+  }
+
+  function openWrapInMenu(el, x, y) {
+    closeAnyMenu();
+    const menu = document.createElement('div');
+    menu.id = 'bb-wrapin-menu';
+    menu.className = 'bb-ctx-menu';
+    menu.innerHTML = `<div class="bb-ctx-title">Wrap in…</div>`;
+
+    let lastCategory = null;
+    INSERT_LIBRARY.forEach(entry => {
+      if (entry.category !== lastCategory) {
+        const sub = document.createElement('div');
+        sub.className = 'bb-ctx-sub';
+        sub.textContent = entry.category;
+        menu.appendChild(sub);
+        lastCategory = entry.category;
+      }
+      const btn = document.createElement('button');
+      btn.textContent = entry.label;
+      btn.addEventListener('click', () => { wrapElementInShell(el, entry); closeAnyMenu(); });
+      menu.appendChild(btn);
+    });
+
+    positionMenu(menu, x, y);
   }
 
   function insertRow(cls, anchorRow, position) {
@@ -5001,7 +5122,7 @@ function addParagraphToRow(rowEl) {
     add('↗ Open URL in new tab', () => openIframeUrlInNewTab(iframeEl));
     add('✎ Edit title attribute…', () => editIframeTitle(iframeEl));
     add('🔁 Replace iframe URL…', () => replaceIframeSrc(iframeEl));
-    appendComponentUtilityItems(menu, iframeEl);
+    appendComponentUtilityItems(menu, iframeEl, x, y);
     positionMenu(menu, x, y);
   }
 
@@ -5315,7 +5436,7 @@ function addParagraphToRow(rowEl) {
     } else {
       add('Add animated icon in header…', () => cardAddAnimatedIconHeader(cardEl));
     }
-    appendComponentUtilityItems(menu, cardEl);
+    appendComponentUtilityItems(menu, cardEl, x, y);
     positionMenu(menu, x, y);
   }
 
@@ -5513,7 +5634,7 @@ function addParagraphToRow(rowEl) {
     menu.appendChild(sepR);
     add('🔗 Replace image URL…', () => replaceImageSrc(imgEl));
 
-    appendComponentUtilityItems(menu, st.figure || imgEl);
+    appendComponentUtilityItems(menu, st.figure || imgEl, x, y);
     positionMenu(menu, x, y);
   }
 
