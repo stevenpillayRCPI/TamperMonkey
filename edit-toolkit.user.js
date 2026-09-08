@@ -5,7 +5,7 @@
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      6.4
+// @version      6.6
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -2824,6 +2824,66 @@
     return tgt.closest('.accordion-item');
   }
 
+  // ─── COMPONENT UTILITY OPS ──────────────────────────────────────────────────
+  // Shared across card/component/image/iframe menus. `el` is always the
+  // component's own element (never the row), so these work correctly on
+  // components nested inside other components (e.g. a card inside a card).
+  function addParagraphAfterElement(el) {
+    const didWrite = tinyWrite((ed) => {
+      const p = tinyDoc.createElement('p');
+      p.innerHTML = '<br>';
+      el.parentNode.insertBefore(p, el.nextSibling);
+      ed.focus();
+      const rng = tinyDoc.createRange();
+      rng.setStart(p, 0); rng.collapse(true);
+      const s = tinyWin.getSelection();
+      s.removeAllRanges(); s.addRange(rng);
+    }, 'add paragraph after element', { ungated: true });
+    if (didWrite) { toast('✓ Paragraph added — start typing', 'success'); scheduleAudit(); }
+    else toast('Editor API unavailable', 'warn');
+  }
+
+  function insertBrAdjacent(el, pos) {
+    const didWrite = tinyWrite(() => {
+      const br = tinyDoc.createElement('br');
+      if (pos === 'before') el.parentNode.insertBefore(br, el);
+      else el.parentNode.insertBefore(br, el.nextSibling);
+    }, 'insert br ' + pos, { ungated: true });
+    if (didWrite) { toast('✓ <br> inserted', 'success'); scheduleAudit(); }
+    else toast('Editor API unavailable', 'warn');
+  }
+
+  function copyElementClean(el) {
+    copyToClipboard(el.outerHTML);
+    toast('✓ Component copied — paste with Ctrl+V', 'success');
+  }
+
+  function cutElementClean(el) {
+    copyToClipboard(el.outerHTML);
+    const didWrite = tinyWrite(() => { el.remove(); }, 'cut element', { ungated: true });
+    if (didWrite) { toast('✓ Component cut — paste with Ctrl+V', 'success'); scheduleAudit(); refreshComponentList(); }
+    else toast('Copied, but could not remove — editor API unavailable', 'warn');
+  }
+
+  function appendComponentUtilityItems(menu, el) {
+    const sep = document.createElement('div');
+    sep.className = 'bb-ctx-sub';
+    sep.textContent = 'Position / clipboard';
+    menu.appendChild(sep);
+    const add = (label, fn, title) => {
+      const btn = document.createElement('button');
+      btn.textContent = label;
+      if (title) btn.title = title;
+      btn.addEventListener('click', () => { fn(); closeAnyMenu(); });
+      menu.appendChild(btn);
+    };
+    add('¶ Add paragraph after this', () => addParagraphAfterElement(el), 'Inserts an empty paragraph directly after this component, even when nested');
+    add('⤒ Insert <br> above', () => insertBrAdjacent(el, 'before'));
+    add('⤓ Insert <br> below', () => insertBrAdjacent(el, 'after'));
+    add('⧉ Copy component (clean)', () => copyElementClean(el), 'Copies just this component — no row wrapper or guard divs');
+    add('✂ Cut component (clean)', () => cutElementClean(el));
+  }
+
   function openComponentMenu(compEl, tgt, x, y) {
     closeAnyMenu();
     const { type } = componentItemInfo(compEl);
@@ -2909,6 +2969,7 @@
       });
     }
 
+    appendComponentUtilityItems(menu, compEl);
     positionMenu(menu, x, y);
   }
 
@@ -3980,6 +4041,15 @@
       return;
     }
 
+    // Priority 1.46: any other iframe embed (D2L media player, H5P, etc.) not
+    // caught by the YouTube or PDF-embed branches above.
+    const genIframe = tgt.closest && tgt.closest('iframe');
+    if (genIframe) {
+      claim('iframe-menu');
+      openIframeMenu(genIframe, e.clientX, e.clientY);
+      return;
+    }
+
     // Priority 1.5: a convertible/structured component -> component menu.
     // This combines item-ops (delete/move the specific item clicked), convert,
     // and duplicate-component into one menu.
@@ -4871,6 +4941,70 @@ function addParagraphToRow(rowEl) {
     }
   }
 
+  // ─── GENERIC IFRAME MENU ────────────────────────────────────────────────────
+  // Any embed iframe not already handled above (YouTube has its own menu with
+  // the privacy toggle; PDF embeds have their own menu). Covers D2L media
+  // player videos, H5P, and any other embed.
+  function copyIframeLink(iframeEl) {
+    const src = iframeEl.getAttribute('src') || '';
+    if (!src) { toast('No src on this iframe', 'warn'); return; }
+    copyAsText(src);
+    toast('✓ Iframe URL copied', 'success');
+  }
+
+  function editIframeTitle(iframeEl) {
+    const cur = iframeEl.getAttribute('title') || '';
+    const next = window.prompt('Iframe title (read by screen readers):', cur);
+    if (next == null) return;
+    const didWrite = tinyWrite(() => {
+      iframeEl.setAttribute('title', next);
+    }, 'edit iframe title', { ungated: true });
+    if (didWrite) { toast('✓ Title set', 'success'); scheduleAudit(); }
+    else toast('Editor API unavailable', 'warn');
+  }
+
+  function replaceIframeSrc(iframeEl) {
+    const cur = iframeEl.getAttribute('src') || '';
+    const next = window.prompt('New iframe URL:', cur);
+    if (next == null) return;
+    const url = next.trim();
+    if (!url) return;
+    const didWrite = tinyWrite(() => {
+      iframeEl.setAttribute('src', url);
+      iframeEl.removeAttribute('data-mce-src');
+    }, 'replace iframe src', { ungated: true });
+    if (didWrite) { toast('✓ Iframe URL replaced', 'success'); scheduleAudit(); }
+    else toast('Editor API unavailable', 'warn');
+  }
+
+  function openIframeUrlInNewTab(iframeEl) {
+    const src = iframeEl.getAttribute('src') || '';
+    if (!src) { toast('No src on this iframe', 'warn'); return; }
+    window.open(src, '_blank', 'noopener');
+  }
+
+  function openIframeMenu(iframeEl, x, y) {
+    closeAnyMenu();
+    const src = iframeEl.getAttribute('src') || '';
+    const shown = src.length > 40 ? src.slice(0, 40) + '…' : src;
+    const menu = document.createElement('div');
+    menu.id = 'bb-iframe-menu';
+    menu.className = 'bb-ctx-menu';
+    menu.innerHTML = `<div class="bb-ctx-title">Iframe: ${escapeHtml(shown)}</div>`;
+    const add = (label, fn) => {
+      const btn = document.createElement('button');
+      btn.textContent = label;
+      btn.addEventListener('click', () => { fn(); closeAnyMenu(); });
+      menu.appendChild(btn);
+    };
+    add('🔗 Copy embed URL', () => copyIframeLink(iframeEl));
+    add('↗ Open URL in new tab', () => openIframeUrlInNewTab(iframeEl));
+    add('✎ Edit title attribute…', () => editIframeTitle(iframeEl));
+    add('🔁 Replace iframe URL…', () => replaceIframeSrc(iframeEl));
+    appendComponentUtilityItems(menu, iframeEl);
+    positionMenu(menu, x, y);
+  }
+
   // ─── LINK ACTIONS ───────────────────────────────────────────────────────────
   // Tracking params we strip from URLs.
   const TRACKING_PARAMS = [
@@ -5181,6 +5315,7 @@ function addParagraphToRow(rowEl) {
     } else {
       add('Add animated icon in header…', () => cardAddAnimatedIconHeader(cardEl));
     }
+    appendComponentUtilityItems(menu, cardEl);
     positionMenu(menu, x, y);
   }
 
@@ -5378,6 +5513,7 @@ function addParagraphToRow(rowEl) {
     menu.appendChild(sepR);
     add('🔗 Replace image URL…', () => replaceImageSrc(imgEl));
 
+    appendComponentUtilityItems(menu, st.figure || imgEl);
     positionMenu(menu, x, y);
   }
 
