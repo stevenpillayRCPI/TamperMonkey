@@ -5,7 +5,7 @@
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      6.2
+// @version      6.4
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -4760,6 +4760,7 @@ function addParagraphToRow(rowEl) {
       const tmp = tinyDoc.createElement('div');
       tmp.innerHTML = html.trim();
       const newRow = tmp.firstElementChild;
+      let insertedNode = null;
 
       if (anchorRow && anchorRow.parentNode) {
         if (position === 'before') anchorRow.parentNode.insertBefore(newRow, anchorRow);
@@ -4767,18 +4768,26 @@ function addParagraphToRow(rowEl) {
       } else {
         const container = ed.getBody().querySelector('.container') || ed.getBody();
         let node = ed.selection.getNode();
-        while (node && node.parentElement && node.parentElement !== container) {
+        while (node && node.parentElement && node.parentElement !== container &&
+               !(node.parentElement.getAttribute && node.parentElement.getAttribute('contenteditable') === 'true')) {
           node = node.parentElement;
         }
         if (node && node.parentElement === container) {
           container.insertBefore(newRow, node.nextSibling);
+        } else if (node && node.parentElement) {
+          // Caret is nested inside a card/column etc. — drop the unwrapped
+          // component right there instead of climbing out to the top-level row.
+          insertedNode = extractShellComponent(html);
+          node.parentElement.insertBefore(insertedNode, node.nextSibling);
         } else {
           container.appendChild(newRow);
         }
       }
 
       try {
-        const editable = newRow.querySelector('.editable-row-content');
+        const editable = insertedNode
+          ? (insertedNode.querySelector('[contenteditable="true"]') || insertedNode)
+          : newRow.querySelector('.editable-row-content');
         if (editable) {
           const rng = tinyDoc.createRange();
           rng.selectNodeContents(editable);
