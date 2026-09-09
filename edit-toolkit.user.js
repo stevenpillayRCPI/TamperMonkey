@@ -5,7 +5,7 @@
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      6.4
+// @version      6.5
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -4058,7 +4058,7 @@
     // Priority 1.35: a card (not on its icon) -> variant/icon menu.
     if (cardEl) {
       claim('card-menu');
-      openCardMenu(cardEl, e.clientX, e.clientY);
+      openCardMenu(cardEl, e.clientX, e.clientY, tgt);
       return;
     }
 
@@ -5442,7 +5442,7 @@ function addParagraphToRow(rowEl) {
   const CARD_VARIANTS = ['white', 'primary', 'secondary', 'tertiary'];
   const ANIMATED_ICON_TOKEN = '391cb841-334a-42ea-ae60-5955a80eb056'; // update once self-hosting replaces this
 
-  function openCardMenu(cardEl, x, y) {
+  function openCardMenu(cardEl, x, y, tgt) {
     closeAnyMenu();
     const current = CARD_VARIANTS.find(v => cardEl.classList.contains('card-' + v)) || null;
     const hasIcon = cardEl.classList.contains('card-with-icon');
@@ -5478,6 +5478,25 @@ function addParagraphToRow(rowEl) {
       add('Add animated icon in header…', () => cardAddAnimatedIconHeader(cardEl));
     }
     appendComponentUtilityItems(menu, cardEl, x, y);
+
+    // Insert a library component right after the clicked block, within this
+    // card's own content area — same "at cursor" behaviour as the row menu's
+    // equivalent option, but scoped to the card so it doesn't escape it.
+    const editableForInsert = cardEl.querySelector('.card-body [contenteditable="true"]');
+    const clickedBlock = (tgt && editableForInsert) ? directChildOf(editableForInsert, tgt) : null;
+    if (clickedBlock) {
+      const insertHereBtn = document.createElement('button');
+      insertHereBtn.textContent = '▸ Insert component at clicked block…';
+      insertHereBtn.title = 'Adds a library component right after the block you clicked, within this card';
+      insertHereBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const cur = document.getElementById('bb-card-menu');
+        if (cur) cur.remove();
+        openInsertComponentMenu(x, y, null, null, false, clickedBlock);
+      });
+      menu.appendChild(insertHereBtn);
+    }
+
     positionMenu(menu, x, y);
   }
 
