@@ -5,7 +5,7 @@
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      6.7
+// @version      6.8
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -1461,8 +1461,7 @@
 
   function genIconListItem() {
     return `<li contenteditable="true">
-  <i class="bi bi-check-circle-fill" aria-hidden="true" contenteditable="false"></i>
-  <span class="deletion-guard" contenteditable="true"></span>New Item 
+  <i class="bi bi-check-circle-fill" aria-hidden="true" contenteditable="false"></i>New Item 
 </li>`;
   }
 
