@@ -5,7 +5,7 @@
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      6.5
+// @version      6.6
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -3680,6 +3680,10 @@
     document.getElementById('bb-icon-modal').style.display = 'flex';
     document.getElementById('bb-icon-search').value = '';
     document.querySelectorAll('.bb-icon-opt').forEach(b => b.style.display = '');
+    // "Replace with Image Placeholder" doesn't apply to icon-list items —
+    // those are swapped via the small inline <i>, not promoted to a figure.
+    const imgBtn = document.getElementById('bb-icon-to-img');
+    if (imgBtn) imgBtn.style.display = iEl.closest('.icon-list') ? 'none' : '';
   }
 
   function closeIconModal() {
