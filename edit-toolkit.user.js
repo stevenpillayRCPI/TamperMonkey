@@ -5,7 +5,7 @@
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      6.8
+// @version      6.9
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -2725,7 +2725,7 @@
         if (targetSel && tabContent) {
           const pane = tabContent.querySelector(targetSel)
                     || [...tabContent.children].find(c => '#' + c.id === targetSel);
-          const inner = pane && (pane.querySelector('[contenteditable="true"]') || pane);
+          const inner = pane && ([...pane.querySelectorAll('[contenteditable="true"]')].find(e => !e.classList.contains('deletion-guard')) || pane);
           bodyHTML = inner ? inner.innerHTML.trim() : '';
         }
         pairs.push({ heading, bodyHTML });
