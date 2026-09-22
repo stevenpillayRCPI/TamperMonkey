@@ -5,7 +5,7 @@
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      6.9
+// @version      7.0
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -1632,6 +1632,22 @@
 </table></div></div>`);
   }
 
+  function shellTimeline() {
+    return TPL.wrapRow(`<div class="timeline" contenteditable="false">
+  <div class="timeline-item">
+    <span class="timeline-marker" aria-hidden="true"></span>
+    <div class="timeline-content">
+    <div contenteditable="true">
+      <p class="timeline-date">Date</p>
+    </div>
+      <h3 contenteditable="false"><span contenteditable="true">Title</span></h3>
+    <div contenteditable="true">
+      <p>Description.</p>
+    </div></div>
+  </div>
+</div>`);
+  }
+
   function shellClickAndReveal() {
     return TPL.wrapRow(genRevealItem());
   }
@@ -1692,6 +1708,8 @@
 
     { category: 'Tables', label: 'Table',                              build: shellTable },
     { category: 'Tables', label: 'Reveal Table',                       build: shellRevealTable },
+
+    { category: 'Timeline', label: 'Timeline',                         build: shellTimeline },
 
     { category: 'Interactive', label: 'Click and Reveal',              build: shellClickAndReveal },
     { category: 'Interactive', label: 'Reflection',                    build: shellReflection },
