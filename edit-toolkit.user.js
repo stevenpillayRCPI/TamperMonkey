@@ -5,7 +5,7 @@
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      7.1
+// @version      7.2
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -532,6 +532,12 @@
   // showFixPreview() renders both as a checklist; only the toggled-on fixes run
   // when the user clicks Apply (all within one tinyWrite = one undo step).
 
+  // Word/Office attribute cruft: paraid, paraeid, data-contrast,
+  // data-ccp-props, xml:lang, plus any w:/o:/m:/v: namespaced attrs.
+  // Shared between the row-level "Strip Word/paste formatting" action and
+  // the page-wide one-click fix.
+  const WORD_ATTR = /^(paraid|paraeid|data-contrast|data-ccp-props|data-ccp-parse-fields|xml:lang|lang)$/i;
+
   function scanFixIssues() {
     const ed = getTinyEditor();
     if (!ed) return null;
@@ -875,6 +881,22 @@
           id: fid(), category: 'Performance',
           label: `Add lazy-loading to ${eager.length} iframe embed(s)`,
           apply: () => { eager.forEach(f => f.setAttribute('loading', 'lazy')); }
+        });
+      }
+    }
+
+    // 13b. Word/Office attribute cruft anywhere in the page (paraid, paraeid,
+    // data-contrast, data-ccp-props, xml:lang, w:/o:/m:/v: namespaced attrs).
+    {
+      const dirty = [];
+      body.querySelectorAll('*').forEach(el => {
+        if ([...el.attributes].some(a => WORD_ATTR.test(a.name) || /^(w|o|m|v):/i.test(a.name))) dirty.push(el);
+      });
+      if (dirty.length) {
+        fixes.push({
+          id: fid(), category: 'Hygiene',
+          label: `Strip Word attribute cruft (paraid/data-contrast/xml:lang/etc.) from ${dirty.length} element(s)`,
+          apply: () => { dirty.forEach(el => { [...el.attributes].forEach(a => { if (WORD_ATTR.test(a.name) || /^(w|o|m|v):/i.test(a.name)) el.removeAttribute(a.name); }); }); }
         });
       }
     }
@@ -4403,7 +4425,6 @@
         });
         // strip Word/Office attribute cruft: paraid, paraeid, data-contrast,
         // data-ccp-props, xml:lang, and any w:/o:/m:/v: namespaced attrs
-        const WORD_ATTR = /^(paraid|paraeid|data-contrast|data-ccp-props|data-ccp-parse-fields|xml:lang|lang)$/i;
         root.querySelectorAll('*').forEach(el => {
           [...el.attributes].forEach(a => {
             if (WORD_ATTR.test(a.name) || /^(w|o|m|v):/i.test(a.name)) el.removeAttribute(a.name);
