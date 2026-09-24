@@ -5,7 +5,7 @@
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      7.0
+// @version      7.1
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -4400,6 +4400,14 @@
         root.querySelectorAll('[class]').forEach(el => {
           const cleaned = el.className.split(/\s+/).filter(c => !/^Mso/.test(c)).join(' ');
           if (cleaned !== el.className) el.className = cleaned;
+        });
+        // strip Word/Office attribute cruft: paraid, paraeid, data-contrast,
+        // data-ccp-props, xml:lang, and any w:/o:/m:/v: namespaced attrs
+        const WORD_ATTR = /^(paraid|paraeid|data-contrast|data-ccp-props|data-ccp-parse-fields|xml:lang|lang)$/i;
+        root.querySelectorAll('*').forEach(el => {
+          [...el.attributes].forEach(a => {
+            if (WORD_ATTR.test(a.name) || /^(w|o|m|v):/i.test(a.name)) el.removeAttribute(a.name);
+          });
         });
         // remove empty <o:p> and similar
         root.querySelectorAll('o\\:p, st1\\:*').forEach(n => n.remove());
