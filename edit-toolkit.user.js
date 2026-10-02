@@ -5,7 +5,7 @@
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      7.3
+// @version      7.4
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -561,16 +561,44 @@
           id: fid(), category: 'Structure',
           label: `Duplicate id "${origId}" → make unique`,
           apply: () => {
-            const scope = el.closest('.row.wysiwyg-mode') || body;
             const newId = origId + '-' + Math.random().toString(36).slice(2, 6);
-            scope.querySelectorAll(`[data-bs-target="#${cssEsc(origId)}"]`).forEach(r => r.setAttribute('data-bs-target', '#' + newId));
-            scope.querySelectorAll(`[aria-controls="${cssEsc(origId)}"]`).forEach(r => r.setAttribute('aria-controls', newId));
-            scope.querySelectorAll(`[aria-labelledby="${cssEsc(origId)}"]`).forEach(r => r.setAttribute('aria-labelledby', newId));
+            const sel = `[data-bs-target="#${cssEsc(origId)}"],[aria-controls="${cssEsc(origId)}"],[aria-labelledby="${cssEsc(origId)}"]`;
+            // only rewrite references inside the component that owns this duplicate
+            let root = el.parentElement;
+            while (root && root !== body && !root.querySelector(sel)) root = root.parentElement;
+            if (root && root !== body) root.querySelectorAll(sel).forEach(r => {
+              if (r.getAttribute('data-bs-target') === '#' + origId) r.setAttribute('data-bs-target', '#' + newId);
+              if (r.getAttribute('aria-controls') === origId) r.setAttribute('aria-controls', newId);
+              if (r.getAttribute('aria-labelledby') === origId) r.setAttribute('aria-labelledby', newId);
+            });
             el.id = newId;
           }
         });
       });
     }
+
+    // 1b. Tab buttons not wired to their own panes -> rewire by position.
+    body.querySelectorAll('ul.nav-tabs').forEach(nav => {
+      const tc = nav.parentElement && nav.parentElement.querySelector(':scope > .tab-content');
+      if (!tc) return;
+      const links = [...nav.querySelectorAll('.nav-link[data-bs-target]')];
+      const panes = [...tc.querySelectorAll(':scope > .tab-pane')];
+      if (!links.length || links.length !== panes.length) return;
+      const broken = links.some((l, i) =>
+        l.getAttribute('data-bs-target') !== '#' + panes[i].id ||
+        l.getAttribute('aria-controls') !== panes[i].id ||
+        panes[i].getAttribute('aria-labelledby') !== l.id);
+      if (!broken) return;
+      fixes.push({
+        id: fid(), category: 'Structure',
+        label: 'Tab buttons not wired to their own panes → rewire by position',
+        apply: () => links.forEach((l, i) => {
+          l.setAttribute('data-bs-target', '#' + panes[i].id);
+          l.setAttribute('aria-controls', panes[i].id);
+          panes[i].setAttribute('aria-labelledby', l.id);
+        })
+      });
+    });
 
     // 2. "Open All" on single-item accordion.
     body.querySelectorAll('.accordion:not(.transcript)').forEach(acc => {
