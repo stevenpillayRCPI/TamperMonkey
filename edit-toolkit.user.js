@@ -5,7 +5,7 @@
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      7.2
+// @version      7.3
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -1371,8 +1371,8 @@
   }
 
   function genVerticalTabItem(parentId, index) {
-    const tabId     = `vtab-${index}`;
-    const contentId = `vtab-${index}-content`;
+    const tabId     = `${parentId}-vtab-${index}`;
+    const contentId = `${parentId}-vtab-${index}-content`;
     return {
       nav: `<li class="nav-item" role="presentation">
   <button class="nav-link" id="${tabId}-tab" data-bs-toggle="tab" data-bs-target="#${contentId}"
@@ -1417,7 +1417,7 @@
   }
 
   function genCarouselSlide(parentId, index) {
-    return `<div class="carousel-item" id="${parentId}-item-${index}" role="tabpanel"
+    return `<div class="carousel-item${index === 0 ? ' active' : ''}" id="${parentId}-item-${index}" role="tabpanel"
      aria-roledescription="slide" aria-label="${index + 1} of ?">
   <div class="deletion-guard" contenteditable="true"></div>
   <div class="carousel-image" contenteditable="false">
@@ -1434,7 +1434,7 @@
   }
 
   function genTextCarouselSlide(parentId, index) {
-    return `<div class="carousel-item" id="${parentId}-item-${index}" role="tabpanel"
+    return `<div class="carousel-item${index === 0 ? ' active' : ''}" id="${parentId}-item-${index}" role="tabpanel"
      aria-roledescription="slide" aria-label="${index + 1} of ?">
   <div class="deletion-guard" contenteditable="true"></div>
   <div class="text-carousel-content">
@@ -1768,7 +1768,7 @@
         return { html: t.nav + '\n<!-- TAB CONTENT -->\n' + t.content, label: 'Vertical Tab (nav + content)', tabType: 'vertical', parts: t };
       }
       case 'Flipcards': {
-        const count = el.querySelectorAll('.flip-card-wrapper').length;
+        const count = el.querySelectorAll('.flip-card-container').length;
         return { html: genFlipcard(count), label: 'Flipcard', tabType: null };
       }
       case 'Image Carousel': {
@@ -3122,9 +3122,18 @@
       if (carId) s.id = `${carId}-item-${i}`;
       s.setAttribute('aria-label', `${i + 1} of ${total}`);
     });
+    // Bootstrap shows nothing without one .active slide: repair if none.
+    if (slides.length && !slides.some(s => s.classList.contains('active'))) slides[0].classList.add('active');
     const indicators = compEl.querySelector('.carousel-indicators');
     if (indicators) {
+      const activeIdx = Math.max(0, slides.findIndex(s => s.classList.contains('active')));
       [...indicators.querySelectorAll('button')].forEach((b, i) => {
+        if (!indicators.querySelector('button.active')) {
+          const on = i === activeIdx;
+          b.classList.toggle('active', on);
+          b.setAttribute('aria-selected', on ? 'true' : 'false');
+          if (on) b.setAttribute('aria-current', 'true'); else b.removeAttribute('aria-current');
+        }
         b.setAttribute('data-bs-slide-to', String(i));
         if (carId) b.setAttribute('aria-controls', `${carId}-item-${i}`);
         b.setAttribute('aria-label', `Slide ${i + 1}`);
