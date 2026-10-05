@@ -5,7 +5,7 @@
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      7.4
+// @version      7.5
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -612,15 +612,6 @@
       }
     });
 
-    // 3. "Open All" on transcript accordion.
-    body.querySelectorAll('.accordion.transcript').forEach(acc => {
-      const btn = acc.parentElement && acc.parentElement.querySelector('.accordion-toggle-button');
-      if (btn) fixes.push({
-        id: fid(), category: 'Structure',
-        label: 'Remove "Open All" from a transcript accordion',
-        apply: () => { (btn.closest('.d-flex.justify-content-end') || btn).remove(); }
-      });
-    });
 
     // 3. "Open All" on transcript accordion.
     body.querySelectorAll('.accordion.transcript').forEach(acc => {
@@ -995,6 +986,69 @@
         });
       }
     });
+
+    // 16. Bare text directly inside a <div> (typically
+    // <div contenteditable="true">Text<br>) -> wrap in <p>. Only runs that
+    // contain a real text node are wrapped. Skipped: non-editable zones,
+    // buttons/links/headings/captions/badges, and anything inside li/td/th
+    // (rule 17 keeps those free of <p>).
+    {
+      const INLINE = /^(A|B|STRONG|EM|I|U|SPAN|SUB|SUP|CODE|MARK|SMALL|BR|ABBR|CITE|S|DEL|INS|KBD|Q)$/;
+      const SKIP_ANC = 'button, a, figcaption, h1, h2, h3, h4, h5, h6, p, li, td, th, label, .deletion-guard, .btn, .badge, [data-mce-bogus]';
+      const bareRuns = (div) => {
+        const runs = []; let cur = [];
+        const flush = () => {
+          if (cur.some(n => n.nodeType === 3 && n.nodeValue.trim())) runs.push(cur);
+          cur = [];
+        };
+        div.childNodes.forEach(n => {
+          if (n.nodeType === 3 || (n.nodeType === 1 && INLINE.test(n.tagName))) cur.push(n); else flush();
+        });
+        flush();
+        return runs;
+      };
+      body.querySelectorAll('div').forEach(div => {
+        if (div.classList.contains('deletion-guard') || div.classList.contains('btn') || div.classList.contains('badge')) return;
+        if (div.closest(SKIP_ANC)) return;
+        const ce = div.closest('[contenteditable]');
+        if (ce && ce.getAttribute('contenteditable') === 'false') return;
+        const runs = bareRuns(div);
+        if (!runs.length) return;
+        const sample = runs[0].map(n => n.textContent).join('').trim().slice(0, 40);
+        fixes.push({
+          id: fid(), category: 'Structure',
+          label: `Wrap bare text in <p> (${runs.length} block${runs.length === 1 ? '' : 's'}): "${sample}"`,
+          apply: () => {
+            bareRuns(div).forEach(run => {
+              const pEl = tinyDoc.createElement('p');
+              run[0].parentNode.insertBefore(pEl, run[0]);
+              run.forEach(n => pEl.appendChild(n));
+              while (pEl.firstChild && pEl.firstChild.nodeName === 'BR') pEl.firstChild.remove();
+              while (pEl.lastChild && pEl.lastChild.nodeName === 'BR') pEl.lastChild.remove();
+            });
+          }
+        });
+      });
+    }
+
+    // 17. A lone <p> inside <li>/<td>/<th> -> unwrap (cells and list items hold
+    // bare text). Skipped when the cell has other block content, more than one
+    // <p>, or the <p> carries a class.
+    {
+      const BLOCK = 'p, div, ul, ol, table, h1, h2, h3, h4, h5, h6, blockquote, figure, pre';
+      body.querySelectorAll('li, td, th').forEach(cell => {
+        const kids = [...cell.children].filter(c => c.matches(BLOCK));
+        if (kids.length !== 1 || kids[0].tagName !== 'P') return;
+        const pEl = kids[0];
+        if (pEl.className || ![...cell.childNodes].every(n => n === pEl || (n.nodeType === 3 && !n.nodeValue.trim()) || (n.nodeType === 1 && !n.matches(BLOCK)))) return;
+        if (!pEl.textContent.trim() && !pEl.querySelector('img, i, svg')) return;
+        fixes.push({
+          id: fid(), category: 'Structure',
+          label: `Remove <p> inside <${cell.tagName.toLowerCase()}>: "${pEl.textContent.trim().slice(0, 40)}"`,
+          apply: () => { while (pEl.firstChild) pEl.parentNode.insertBefore(pEl.firstChild, pEl); pEl.remove(); }
+        });
+      });
+    }
 
     // Expansion point: anything registered via RCPIShared.registerFixCheck()
     // elsewhere gets merged in here automatically — add new fixes without
@@ -1612,14 +1666,19 @@
     return TPL.wrapRow(TPL.accordion(id, genAccordionItem(id, 1)));
   }
 
+  // Same Open All wrapper the plain accordion template uses.
+  function accordionOpenAllWrap(id, accordionHTML) {
+    return `<div class="col-12"><div class="d-flex justify-content-end" contenteditable="false"><button class="btn btn-secondary mb-3 accordion-toggle-button" data-accordion-id="${id}">Open All</button></div>${accordionHTML}</div>`;
+  }
+
   function shellNumberedAccordion() {
     const id = uid('numberedAccordion');
-    return TPL.wrapRow(`<div class="accordion numbered-accordion" id="${id}">${genNumberedAccordionItem(id, 0)}</div>`);
+    return TPL.wrapRow(accordionOpenAllWrap(id, `<div class="accordion numbered-accordion" id="${id}">${genNumberedAccordionItem(id, 0)}</div>`));
   }
 
   function shellIconAccordion() {
     const id = uid('iconAccordion');
-    return TPL.wrapRow(`<div class="accordion icon-accordion" id="${id}">${genIconAccordionItem(id, 0)}</div>`);
+    return TPL.wrapRow(accordionOpenAllWrap(id, `<div class="accordion icon-accordion" id="${id}">${genIconAccordionItem(id, 0)}</div>`));
   }
 
   function shellHorizontalTabs() {
@@ -2778,7 +2837,8 @@
         const heading = (span ? span.textContent : (btn ? btn.textContent : '')).trim();
         const body = item.querySelector('.accordion-body [contenteditable="true"]')
                   || item.querySelector('.accordion-body');
-        pairs.push({ heading, bodyHTML: body ? body.innerHTML.trim() : '' });
+        const ico = btn && btn.querySelector('i.bi, i.icon');
+        pairs.push({ heading, bodyHTML: body ? body.innerHTML.trim() : '', iconClass: ico ? ico.className : '' });
       });
     } else if (kind === 'horizontal-tabs' || kind === 'vertical-tabs') {
       // Locate .tab-content (descendant for vertical, sibling for horizontal).
@@ -2821,7 +2881,28 @@
 
   // Build a fresh component of `targetKind` from extracted pairs, using the
   // ground-truth templates so the output matches the live block-builder exactly.
+  // Build the inner markup (Open All wrapper + accordion) for a numbered or
+  // icon accordion from { heading, bodyHTML, iconClass } pairs.
+  function accordionVariantHTML(pairs, targetKind) {
+    const numbered = targetKind === 'numbered-accordion';
+    const id = uid(numbered ? 'numberedAccordion' : 'iconAccordion');
+    const items = pairs.map((p, i) => {
+      const tmp = document.createElement('div');
+      tmp.innerHTML = numbered ? genNumberedAccordionItem(id, i) : genIconAccordionItem(id, i);
+      const span = tmp.querySelector('.accordion-button span[contenteditable="true"]');
+      if (span) span.textContent = (p.heading || 'Heading') + ' ';
+      const bodyEd = tmp.querySelector('.accordion-body [contenteditable="true"]');
+      if (bodyEd) bodyEd.innerHTML = p.bodyHTML || '<p>Content </p>';
+      if (!numbered && p.iconClass) { const ico = tmp.querySelector('.accordion-button i'); if (ico) ico.className = p.iconClass; }
+      return tmp.innerHTML;
+    }).join('');
+    return accordionOpenAllWrap(id, `<div class="accordion ${numbered ? 'numbered-accordion' : 'icon-accordion'}" id="${id}">${items}</div>`);
+  }
+
   function buildFromPairs(pairs, targetKind) {
+    if (targetKind === 'numbered-accordion' || targetKind === 'icon-accordion') {
+      return TPL.wrapRow(accordionVariantHTML(pairs, targetKind));
+    }
     if (targetKind === 'accordion') {
       const id = uid('accordion');
       const items = pairs.map((p, i) =>
@@ -3060,6 +3141,15 @@
           add('− Remove last item', () => deleteLastItem(comp), true);
         }
       }
+    }
+
+    // Swap accordion variant (normal / numbered / icon). Transcript accordions excluded.
+    const accKind = componentKind(compEl);
+    if (accKind && ACCORDION_VARIANTS.some(v => v.kind === accKind) && !compEl.classList.contains('transcript')) {
+      ACCORDION_VARIANTS.forEach(v => {
+        if (v.kind === accKind) return;
+        add('⇄ Swap to ' + v.label, () => swapAccordionVariant(compEl, accKind, v.kind));
+      });
     }
 
     // Convert (only for header+content types)
@@ -3331,6 +3421,53 @@
     }
 
     positionMenu(menu, x, y);
+  }
+
+  const ACCORDION_VARIANTS = [
+    { kind: 'accordion',          label: 'Normal accordion' },
+    { kind: 'numbered-accordion', label: 'Numbered accordion' },
+    { kind: 'icon-accordion',     label: 'Icon accordion' },
+  ];
+
+  // Swap an accordion between normal / numbered / icon in place. Replaces only
+  // the accordion (and its Open All button), never the enclosing row.
+  function swapAccordionVariant(compEl, kind, targetKind) {
+    const pairs = extractPairs(compEl, kind);
+    if (!pairs.length) { toast('Nothing to swap', 'warn'); return; }
+    let html;
+    if (targetKind === 'accordion') {
+      const id = uid('accordion');
+      html = TPL.accordion(id, pairs.map((p, i) => TPL.accordionItem(id, i, escapeHtml(p.heading || 'Heading'), p.bodyHTML || '<p>Content </p>')).join(''));
+    } else {
+      html = accordionVariantHTML(pairs, targetKind);
+    }
+    const didWrite = tinyWrite(() => {
+      const tmp = tinyDoc.createElement('div');
+      tmp.innerHTML = html.trim();
+      const col = tmp.firstElementChild;           // col-12 > [Open All wrapper, accordion]
+      const oldBtn = compEl.parentElement && compEl.parentElement.querySelector(`.accordion-toggle-button[data-accordion-id="${cssEsc(compEl.id)}"]`);
+      const oldWrap = oldBtn && (oldBtn.closest('.d-flex.justify-content-end') || oldBtn);
+      const par = compEl.parentElement;
+      if (par && (par.classList.contains('editable-row-content') || par.classList.contains('row'))) {
+        // Direct child of the row: keep the col-12 wrapper.
+        if (oldWrap) oldWrap.remove();
+        compEl.replaceWith(col);
+      } else {
+        // Already inside a col wrapper: swap in just the button + accordion.
+        const frag = tinyDoc.createDocumentFragment();
+        while (col.firstChild) frag.appendChild(col.firstChild);
+        if (oldWrap) oldWrap.remove();
+        compEl.replaceWith(frag);
+      }
+    }, 'swap accordion -> ' + targetKind, { ungated: true });
+    if (didWrite) {
+      toast('✓ Swapped to ' + targetKind.replace('-', ' '), 'success');
+      scheduleAudit();
+      refreshComponentList();
+    } else {
+      copyToClipboard(html);
+      toast('✓ Swapped accordion copied as HTML — replace the original manually', 'warn');
+    }
   }
 
   function doConvert(sourceEl, pairs, targetKind) {
@@ -4031,6 +4168,7 @@
 
   function onContextMenu(e) {
     const tgt = e.target;
+    _ctxTgt = tgt; _ctxX = e.clientX; _ctxY = e.clientY;
 
     // ── ALT GATE ──────────────────────────────────────────────────────────────
     // Plain right-click is left ENTIRELY to TinyMCE (links, images, paste,
@@ -5355,8 +5493,55 @@ function addParagraphToRow(rowEl) {
     positionMenu(menu, x, y);
   }
 
+  // ─── <br> DELETION ──────────────────────────────────────────────────────────
+  // <br>s can't be selected in the editor. Alt+right-click inside a block that
+  // holds line breaks adds menu entries to delete the nearest one (or all of
+  // them). Caret-guard <br>s in .deletion-guard are never touched.
+  let _ctxTgt = null, _ctxX = 0, _ctxY = 0;
+  const BR_MENU_IDS = ['bb-table-menu', 'bb-component-menu', 'bb-row-menu', 'bb-card-menu'];
+
+  function brsInBlock(tgt) {
+    if (!tgt || !tgt.closest) return { block: null, brs: [] };
+    const block = tgt.closest('p, li, td, th, h1, h2, h3, h4, h5, h6, [contenteditable="true"]');
+    if (!block || block.classList.contains('deletion-guard')) return { block: null, brs: [] };
+    const brs = [...block.querySelectorAll('br')].filter(b => !b.closest('.deletion-guard') && !b.hasAttribute('data-mce-bogus'));
+    return { block, brs };
+  }
+
+  function appendBrItems(menu) {
+    if (menu.querySelector('.bb-br-sub') || !BR_MENU_IDS.includes(menu.id)) return;
+    const { brs } = brsInBlock(_ctxTgt);
+    if (!brs.length) return;
+    let nearest = brs[0], best = Infinity;
+    brs.forEach(b => {
+      const r = b.getClientRects()[0] || b.getBoundingClientRect();
+      const d = Math.hypot((r.left + r.width / 2) - _ctxX, (r.top + r.height / 2) - _ctxY);
+      if (d < best) { best = d; nearest = b; }
+    });
+    const sub = document.createElement('div');
+    sub.className = 'bb-ctx-sub bb-br-sub';
+    sub.textContent = 'Line breaks (<br>)';
+    menu.appendChild(sub);
+    const mk = (label, fn) => {
+      const btn = document.createElement('button');
+      btn.textContent = label;
+      btn.classList.add('bb-danger');
+      btn.addEventListener('click', () => { fn(); closeAnyMenu(); });
+      menu.appendChild(btn);
+    };
+    mk('✕ Delete nearest line break', () => {
+      if (tinyWrite(() => nearest.remove(), 'delete br', { ungated: true })) { toast('✓ Line break deleted', 'success'); scheduleAudit(); }
+    });
+    if (brs.length > 1) {
+      mk(`✕ Delete all ${brs.length} line breaks here`, () => {
+        if (tinyWrite(() => brs.forEach(b => b.remove()), 'delete all br', { ungated: true })) { toast(`✓ ${brs.length} line breaks deleted`, 'success'); scheduleAudit(); }
+      });
+    }
+  }
+
   // ─── SHARED MENU HELPERS ────────────────────────────────────────────────────
   function positionMenu(menu, x, y, absolute) {
+    appendBrItems(menu);
     // Small × button, top-right, as a backup way to dismiss the menu — the
     // outside-click listener sometimes fails to fire (e.g. on focus loss).
     if (!menu.querySelector('.bb-ctx-close')) {
