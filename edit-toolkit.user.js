@@ -5,7 +5,7 @@
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      7.5
+// @version      7.6
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -1048,6 +1048,31 @@
           apply: () => { while (pEl.firstChild) pEl.parentNode.insertBefore(pEl.firstChild, pEl); pEl.remove(); }
         });
       });
+    }
+
+    // 18. Attribute-less wrapper <div>s (pasted HTML). A <div> with no attributes
+    // whose descendants carry no class/id (so it is not a block-builder wrapper)
+    // is unwrapped, children kept. Aggregated into one toggle.
+    {
+      const plain = [...body.querySelectorAll('div')].filter(d => {
+        if (d.attributes.length) return false;
+        if (d.closest('.mceNonEditable, d2l-element, [class*="d2l-cplus"]')) return false;
+        if (d.querySelector('[class], [id]')) return false;
+        return !!(d.textContent.trim() || d.querySelector('img, i, svg'));
+      });
+      if (plain.length) {
+        fixes.push({
+          id: fid(), category: 'Structure',
+          label: `Remove ${plain.length} unneeded wrapper <div>${plain.length === 1 ? '' : 's'} (no class/id)`,
+          apply: () => {
+            plain.slice().reverse().forEach(d => {
+              if (!d.parentNode) return;
+              while (d.firstChild) d.parentNode.insertBefore(d.firstChild, d);
+              d.remove();
+            });
+          }
+        });
+      }
     }
 
     // Expansion point: anything registered via RCPIShared.registerFixCheck()
