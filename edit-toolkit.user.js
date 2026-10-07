@@ -5,7 +5,7 @@
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      7.8
+// @version      7.9
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -1078,6 +1078,33 @@
         });
       }
     }
+
+    // 19. Worksheet / prompt blocks need a unique data-worksheet / data-prompt
+    // id: the runtime keys localStorage and the .doc filename on it, so a
+    // missing or repeated id makes blocks overwrite each other's saved text.
+    // The first block keeps its id; later duplicates get a numeric suffix.
+    // Renaming resets any text a learner already saved for that block.
+    [['.worksheet', 'data-worksheet', 'worksheet'], ['.prompt-box', 'data-prompt', 'prompt']].forEach(([sel, attr, base]) => {
+      const blocks = [...body.querySelectorAll(sel)];
+      const used = new Set(blocks.map(b => (b.getAttribute(attr) || '').trim()).filter(Boolean));
+      const seen = new Set();
+      blocks.forEach(b => {
+        const cur = (b.getAttribute(attr) || '').trim();
+        if (cur && !seen.has(cur)) { seen.add(cur); return; }
+        fixes.push({
+          id: fid(), category: 'Structure',
+          label: cur ? `Duplicate ${attr} "${cur}" → make unique` : `Missing ${attr} → add unique id`,
+          apply: () => {
+            const stem = cur || base;
+            let i = cur ? 2 : 1;
+            while (used.has(stem + '-' + i)) i++;
+            const next = stem + '-' + i;
+            used.add(next);
+            b.setAttribute(attr, next);
+          }
+        });
+      });
+    });
 
     // Expansion point: anything registered via RCPIShared.registerFixCheck()
     // elsewhere gets merged in here automatically — add new fixes without
