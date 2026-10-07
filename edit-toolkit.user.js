@@ -5,7 +5,7 @@
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      7.6
+// @version      7.8
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -951,12 +951,8 @@
           } else if (is.fix === 'remove-empty') {
             fixes.push({ id: fid(), category: 'Hygiene', label: 'Remove empty paragraph (paste artefact)', apply: () => is.el.remove() });
           } else if (is.fix === 'add-new-window-note') {
-            // The visible new-tab icon on these links isn't itself
-            // accessible text — a screen reader announces nothing extra
-            // for it. Adds a visually-hidden note so the warning is heard
-            // without changing what's visually on the page.
-            fixes.push({ id: fid(), category: 'Links', label: `Add "(opens in a new tab)" note: "${is.el.textContent.trim().slice(0, 30)}"`,
-              apply: () => { const span = tinyDoc.createElement('span'); span.className = 'visually-hidden'; span.textContent = ' (opens in a new tab)'; is.el.appendChild(span); } });
+            // Handled at runtime by bootstrap-custom-cleanup.js
+            // (initNewTabNotes), not written into the page HTML.
           } else if (is.severity !== 'info') {
             // No safe auto-fix — surface for human review, same bucket as
             // the existing image-alt review flags above.
@@ -965,6 +961,14 @@
         });
       } catch (e) { dbg('shared a11y scan failed', e); }
     }
+
+    // 14b. Remove stored "(opens in a new tab)" screen-reader-only text from
+    // links. bootstrap-custom-cleanup.js (initNewTabNotes) adds it at runtime.
+    body.querySelectorAll('a .visually-hidden, a .sr-only').forEach(sp => {
+      if (!/new (window|tab)|opens in (a )?new/i.test(sp.textContent)) return;
+      fixes.push({ id: fid(), category: 'Links', label: `Remove stored new-tab note (added at runtime): "${(sp.closest('a').textContent || '').trim().slice(0, 30)}"`,
+        apply: () => sp.remove() });
+    });
 
     // 15. Reveal items must stay expanded (.collapse.show) while editing.
     // Only the runtime cleanup script (bootstrap-custom-cleanup.js,
