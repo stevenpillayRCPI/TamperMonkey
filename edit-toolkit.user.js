@@ -5,7 +5,7 @@
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      7.9
+// @version      8.0
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -1079,12 +1079,12 @@
       }
     }
 
-    // 19. Worksheet / prompt blocks need a unique data-worksheet / data-prompt
-    // id: the runtime keys localStorage and the .doc filename on it, so a
+    // 19. Worksheet / prompt / reflection blocks need a unique data-worksheet /
+    // data-prompt / data-reflection id: the runtime keys localStorage on it, so a
     // missing or repeated id makes blocks overwrite each other's saved text.
     // The first block keeps its id; later duplicates get a numeric suffix.
     // Renaming resets any text a learner already saved for that block.
-    [['.worksheet', 'data-worksheet', 'worksheet'], ['.prompt-box', 'data-prompt', 'prompt']].forEach(([sel, attr, base]) => {
+    [['.worksheet', 'data-worksheet', 'worksheet'], ['.prompt-box', 'data-prompt', 'prompt'], ['.reflection', 'data-reflection', 'reflection']].forEach(([sel, attr, base]) => {
       const blocks = [...body.querySelectorAll(sel)];
       const used = new Set(blocks.map(b => (b.getAttribute(attr) || '').trim()).filter(Boolean));
       const seen = new Set();
@@ -1105,6 +1105,82 @@
         });
       });
     });
+
+    // 20. Input blocks (reflection / prompt box / worksheet): replace the single
+    // Save button with a Copy / Save to Word / Reset row written into the page
+    // markup. Ticked by default. The learner-view runtime adds these buttons
+    // itself, so this is about storing them in the page HTML (visible in edit
+    // view, no reliance on the runtime). Set defaultOff: true on the fix to
+    // make it start unticked (the preview supports it).
+    // Buttons carry data-bb-action (no new classes, so validate_pages.py's
+    // class check is unaffected) and the runtime moves them into its own
+    // full-width row.
+    {
+      const BTN_SEL = {
+        copy: '[data-bb-action="copy"], .bb-copy, .prompt-copy',
+        export: '[data-bb-action="export"], .bb-export, .prompt-export, .worksheet-export',
+        reset: '[data-bb-action="reset"], .bb-reset, .prompt-reset, .worksheet-reset'
+      };
+      body.querySelectorAll('.reflection, .prompt-box, .worksheet').forEach(block => {
+        if (!block.querySelector('textarea')) return;
+        const hasAll = Object.values(BTN_SEL).every(s => block.querySelector(s));
+        if (hasAll) return;
+        const kind = block.matches('.worksheet') ? 'worksheet' : block.matches('.prompt-box') ? 'prompt box' : 'reflection';
+        const resetLabel = kind === 'worksheet' ? 'Reset table' : kind === 'prompt box' ? 'Reset to original' : 'Reset';
+        const heading = block.querySelector('.reflection-title, h2, h3, caption, p');
+        const hint = ((heading && heading.textContent) || '').trim().slice(0, 30);
+        fixes.push({
+          id: fid(), category: 'Structure',
+          label: `${kind[0].toUpperCase() + kind.slice(1)}${hint ? ` "${hint}"` : ''}: replace Save button with Copy / Save to Word / Reset`,
+          apply: () => {
+            const doc = block.ownerDocument;
+            const olds = [...new Set([
+              ...Object.values(BTN_SEL).flatMap(s => [...block.querySelectorAll(s)]),
+              ...block.querySelectorAll('.save-reflection')
+            ])];
+
+            const mk = (action, label, cls) => {
+              const b = doc.createElement('button');
+              b.type = 'button';
+              b.className = cls;
+              b.setAttribute('data-bb-action', action);
+              b.setAttribute('style', 'flex:1 1 9rem;width:auto;margin:0;padding:0.625rem 1rem;font-size:1rem;');
+              b.textContent = label;
+              return b;
+            };
+            const row = doc.createElement('div');
+            row.setAttribute('style', 'display:flex;flex-wrap:wrap;gap:0.5rem;width:100%;');
+            row.appendChild(mk('copy', 'Copy to clipboard', 'btn btn-primary'));
+            // keep .save-reflection on a reflection's export button so
+            // anything that looks for it still finds it
+            row.appendChild(mk('export', 'Save to Word Document',
+              kind === 'reflection' ? 'btn btn-primary save-reflection' : 'btn btn-primary'));
+            row.appendChild(mk('reset', resetLabel, 'btn btn-outline-primary'));
+
+            if (olds.length) {
+              const first = olds[0];
+              let host = first.parentNode;
+              const onlyButtons = host !== block &&
+                [...host.children].every(c => olds.includes(c)) &&
+                host.textContent.replace(/\s+/g, '') === olds.map(o => o.textContent).join('').replace(/\s+/g, '');
+              if (onlyButtons) {
+                host.parentNode.insertBefore(row, host);
+                host.remove();
+              } else {
+                first.parentNode.insertBefore(row, first);
+                olds.forEach(o => o.remove());
+              }
+            } else {
+              const anchor = block.matches('.worksheet')
+                ? (block.querySelector('.table-responsive') || block.querySelector('table'))
+                : [...block.querySelectorAll('textarea')].pop();
+              if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(row, anchor.nextSibling);
+              else block.appendChild(row);
+            }
+          }
+        });
+      });
+    }
 
     // Expansion point: anything registered via RCPIShared.registerFixCheck()
     // elsewhere gets merged in here automatically — add new fixes without
@@ -1139,12 +1215,12 @@
 
     let html = '';
     if (fixes.length) {
-      html += `<div class="bb-fix-sec-h">Will fix (${fixes.length}) — untick any you want to skip:</div>`;
+      html += `<div class="bb-fix-sec-h">Available fixes (${fixes.length}) — ticked ones will be applied, untick to skip:</div>`;
       const groups = byCat(fixes);
       Object.keys(groups).forEach(cat => {
         html += `<div class="bb-fix-cat">${escapeHtml(cat)}</div>`;
         groups[cat].forEach(f => {
-          html += `<label class="bb-fix-row"><input type="checkbox" class="bb-fix-chk" data-fix="${f.id}" checked> <span>${escapeHtml(f.label)}</span></label>`;
+          html += `<label class="bb-fix-row"><input type="checkbox" class="bb-fix-chk" data-fix="${f.id}"${f.defaultOff ? '' : ' checked'}> <span>${escapeHtml(f.label)}</span></label>`;
         });
       });
     }
