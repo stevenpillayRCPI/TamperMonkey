@@ -5,7 +5,7 @@
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      8.0
+// @version      8.1
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -3137,11 +3137,30 @@
   // Shared across card/component/image/iframe menus. `el` is always the
   // component's own element (never the row), so these work correctly on
   // components nested inside other components (e.g. a card inside a card).
-  function addParagraphAfterElement(el) {
+  // The block under the click, for "insert next to the clicked block". Takes the
+  // innermost paragraph / heading / list / table / figure etc. containing the
+  // click (list items resolve to their list), then climbs until the block's
+  // PARENT is editable, so the insert always lands somewhere you can type. This
+  // is click-based, not component-based, so it works at any nesting depth
+  // (e.g. a paragraph inside a reflection inside a card).
+  function blockAtPoint(tgt) {
+    const el = tgt && tgt.nodeType === 3 ? tgt.parentElement : tgt;
+    if (!el || !el.closest) return null;
+    let blk = el.closest('p, h1, h2, h3, h4, h5, h6, li, blockquote, pre, figure, table, ul, ol, textarea, hr') || el;
+    if (blk.tagName === 'LI') blk = blk.closest('ul, ol') || blk;
+    const root = tinyDoc && tinyDoc.body;
+    while (blk && blk !== root && !(blk.parentElement && blk.parentElement.isContentEditable)) blk = blk.parentElement;
+    if (!blk || blk === root || !blk.parentElement) return null;
+    if (blk.matches('.deletion-guard, .editable-row-content, .row, [class*="col-"]')) return null;
+    return blk;
+  }
+
+  function addParagraphAfterElement(el, pos) {
+    const before = pos === 'before';
     const didWrite = tinyWrite((ed) => {
       const p = tinyDoc.createElement('p');
       p.innerHTML = '<br>';
-      el.parentNode.insertBefore(p, el.nextSibling);
+      el.parentNode.insertBefore(p, before ? el : el.nextSibling);
       ed.focus();
       const rng = tinyDoc.createRange();
       rng.setStart(p, 0); rng.collapse(true);
@@ -3175,10 +3194,6 @@
   }
 
   function appendComponentUtilityItems(menu, el, x, y) {
-    const sep = document.createElement('div');
-    sep.className = 'bb-ctx-sub';
-    sep.textContent = 'Position / clipboard';
-    menu.appendChild(sep);
     const add = (label, fn, title) => {
       const btn = document.createElement('button');
       btn.textContent = label;
@@ -3186,9 +3201,30 @@
       btn.addEventListener('click', () => { fn(); closeAnyMenu(); });
       menu.appendChild(btn);
     };
-    add('¶ Add paragraph after this', () => addParagraphAfterElement(el), 'Inserts an empty paragraph directly after this component, even when nested');
-    add('⤒ Insert <br> above', () => insertBrAdjacent(el, 'before'));
-    add('⤓ Insert <br> below', () => insertBrAdjacent(el, 'after'));
+
+    // Click-based inserts: next to the block you actually right-clicked, in the
+    // nearest editable area, however deeply the component is nested.
+    const clickedBlock = blockAtPoint(_ctxTgt);
+    if (clickedBlock) {
+      const tag = clickedBlock.tagName.toLowerCase();
+      const subB = document.createElement('div');
+      subB.className = 'bb-ctx-sub';
+      subB.textContent = `Next to clicked block <${tag}>`;
+      menu.appendChild(subB);
+      const hint = `Relative to the <${tag}> under the pointer, inside its own editable area`;
+      add('¶ Add paragraph after', () => addParagraphAfterElement(clickedBlock, 'after'), hint);
+      add('¶ Add paragraph before', () => addParagraphAfterElement(clickedBlock, 'before'), hint);
+      add('⤒ Insert <br> above', () => insertBrAdjacent(clickedBlock, 'before'), hint);
+      add('⤓ Insert <br> below', () => insertBrAdjacent(clickedBlock, 'after'), hint);
+    }
+
+    const sep = document.createElement('div');
+    sep.className = 'bb-ctx-sub';
+    sep.textContent = 'Position / clipboard (whole component)';
+    menu.appendChild(sep);
+    add('¶ Add paragraph after component', () => addParagraphAfterElement(el), 'Inserts an empty paragraph directly after this whole component, even when nested');
+    add('⤒ Insert <br> above component', () => insertBrAdjacent(el, 'before'));
+    add('⤓ Insert <br> below component', () => insertBrAdjacent(el, 'after'));
     add('⧉ Copy component (clean)', () => copyElementClean(el), 'Copies just this component — no row wrapper or guard divs');
     add('✂ Cut component (clean)', () => cutElementClean(el));
 
