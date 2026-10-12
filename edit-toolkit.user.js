@@ -5,7 +5,7 @@
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      8.2
+// @version      8.4
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -1006,7 +1006,7 @@
       const bareRuns = (div) => {
         const runs = []; let cur = [];
         const flush = () => {
-          if (cur.some(n => n.nodeType === 3 && n.nodeValue.trim())) runs.push(cur);
+          if (cur.some(n => n.textContent.trim())) runs.push(cur);
           cur = [];
         };
         div.childNodes.forEach(n => {
@@ -1184,6 +1184,42 @@
           }
         });
       });
+    }
+
+        // 21. Tables: strip inline width/height (styles + attributes) and make sure
+    // every table sits inside .table-responsive.
+    {
+      const SIZE_PROPS = ['width', 'height', 'min-width', 'max-width', 'min-height', 'max-height'];
+      const TBL_SEL = 'table, colgroup, col, thead, tbody, tfoot, tr, td, th';
+      const sized = [...body.querySelectorAll(TBL_SEL)].filter(el =>
+        el.hasAttribute('width') || el.hasAttribute('height') ||
+        SIZE_PROPS.some(p => el.style.getPropertyValue(p)));
+      if (sized.length) {
+        fixes.push({
+          id: fid(), category: 'Tables',
+          label: `Remove inline width/height from ${sized.length} table element(s)`,
+          apply: () => sized.forEach(el => {
+            SIZE_PROPS.forEach(p => el.style.removeProperty(p));
+            el.removeAttribute('width');
+            el.removeAttribute('height');
+            if (!el.getAttribute('style')) el.removeAttribute('style');
+            el.removeAttribute('data-mce-style');
+          })
+        });
+      }
+      const unwrapped = [...body.querySelectorAll('table')].filter(t => !t.closest('.table-responsive'));
+      if (unwrapped.length) {
+        fixes.push({
+          id: fid(), category: 'Tables',
+          label: `Wrap ${unwrapped.length} table(s) in .table-responsive`,
+          apply: () => unwrapped.forEach(t => {
+            const w = tinyDoc.createElement('div');
+            w.className = 'table-responsive';
+            t.parentNode.insertBefore(w, t);
+            w.appendChild(t);
+          })
+        });
+      }
     }
 
     // Expansion point: anything registered via RCPIShared.registerFixCheck()
@@ -6155,6 +6191,7 @@ function addParagraphToRow(rowEl) {
     sepAlt.textContent = 'Alt text';
     menu.appendChild(sepAlt);
     add('⌀ Set alt=""', () => setAltEmpty(imgEl));
+    add('⌀ Set alt="See caption..."', () => setAltCaption(imgEl));
     add('⌀ Set alt="See accordion..."', () => setAltAccordion(imgEl));
     add('✎ Set alt text…', () => setAltText(imgEl));
 
@@ -6174,6 +6211,13 @@ function addParagraphToRow(rowEl) {
       imgEl.setAttribute('alt', '');
     }, 'set alt empty', { ungated: true });
     finishImage(didWrite, 'alt set to ""');
+  }
+
+    function setAltCaption(imgEl) {
+    const didWrite = tinyWrite(() => {
+      imgEl.setAttribute('alt', 'See caption below image');
+    }, 'set alt caption', { ungated: true });
+    finishImage(didWrite, 'alt set to "See caption below image"');
   }
 
     function setAltAccordion(imgEl) {
