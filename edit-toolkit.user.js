@@ -5,7 +5,7 @@
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      8.4
+// @version      8.6
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -1907,8 +1907,8 @@
   }
 
   function shellRevealTable() {
-    return TPL.wrapRow(`<div class="col-12"><div class="table-responsive row reveal-table"><table class="table"><caption contenteditable="true">Caption</caption>
-<thead><tr><th scope="row" contenteditable="true">Prompt</th><th scope="row" contenteditable="true">Reveal Content</th></tr></thead>
+    return TPL.wrapRow(`<div class="col-12"><div class="table-responsive reveal-table"><table class="table"><caption>Caption</caption>
+<thead><tr><th scope="row">Prompt</th><th scope="row">Reveal Content</th></tr></thead>
 <tbody>${genRevealTableRow()}</tbody>
 </table></div></div>`);
   }
