@@ -5,7 +5,7 @@
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      8.9
+// @version      9.0
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -4459,6 +4459,7 @@
     const iconColEl = tgt.closest && tgt.closest('.icon-column');
     const iconHeadingEl = tgt.closest && tgt.closest('.icon-heading');
     const cardEl = tgt.closest && tgt.closest('.card');
+    const revealEl = tgt.closest && tgt.closest('.reveal-container');
     const imgEl  = tgt.closest && tgt.closest('img');
     const rowEl  = tgt.closest && tgt.closest('.row.wysiwyg-mode');
     // A YouTube iframe whose src can be switched to the privacy domain.
@@ -4509,7 +4510,8 @@
       return;
     }
     // Priority 1.35: a card (not on its icon) -> variant/icon menu.
-    if (cardEl) {
+    // A reveal nested inside the card wins over the card (handled at 1.47).
+    if (cardEl && !(revealEl && cardEl.contains(revealEl))) {
       claim('card-menu');
       openCardMenu(cardEl, e.clientX, e.clientY, tgt);
       return;
@@ -4556,7 +4558,6 @@
     // Priority 1.47: a Click and Reveal item (button or content) -> reveal
     // menu. Wins over an enclosing component so a reveal nested in one is
     // still reachable.
-    const revealEl = tgt.closest && tgt.closest('.reveal-container');
     if (revealEl && (!convEl || convEl.contains(revealEl))) {
       claim('reveal-menu');
       openRevealMenu(revealEl, tgt, e.clientX, e.clientY);
