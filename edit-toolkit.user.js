@@ -5,7 +5,7 @@
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      8.6
+// @version      8.7
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -5974,6 +5974,10 @@ function addParagraphToRow(rowEl) {
     sepI.className = 'bb-ctx-sub';
     sepI.textContent = 'Icon (card-with-icon layout)';
     menu.appendChild(sepI);
+    if (hasIcon) {
+      const iconI = cardEl.querySelector('.icon-column i[class*="bi-"]');
+      if (iconI) add('Change icon…', () => openIconModal(iconI));
+    }
     add(hasIcon ? 'Remove icon header (Bootstrap icon)' : 'Add icon header (Bootstrap icon)', () => cardToggleIcon(cardEl));
     const sepA = document.createElement('div');
     sepA.className = 'bb-ctx-sub';
