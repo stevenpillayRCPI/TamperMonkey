@@ -5,7 +5,7 @@
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      9.0
+// @version      9.1
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -4425,170 +4425,90 @@
       dbg('BB menu CLAIMED as:', what);
     };
 
-    // Priority 0a: inside a table cell -> table menu (single cell or multi-cell).
-    const cellEl = tgt.closest && tgt.closest('td, th');
-    if (cellEl) {
-      claim('table-cell');
-      openTableMenu(cellEl, e.clientX, e.clientY);
-      return;
-    }
+    // Routing: the DEEPEST thing under the cursor gets the menu. We walk up
+    // from the click target and the first ancestor that matches a handler
+    // wins, so a link in a card opens the link menu, a reveal in a card opens
+    // the reveal menu, a card in an accordion opens the card menu, and so on.
+    // A deliberate text selection is the one exception: it is not an element,
+    // so it is checked first (except inside a table cell, where the table menu
+    // has always taken multi-cell selections).
+    const startEl = tgt && (tgt.nodeType === 1 ? tgt : tgt.parentElement);
+    const inCell = !!(startEl && startEl.closest('td, th'));
 
-    // Priority 0b: a DELIBERATE text selection -> wrap menu.
-    // Hardened: require a non-collapsed selection AND that the click happened
-    // inside it. This prevents a leftover selection elsewhere from hijacking a
-    // click meant for something else.
     const sel = tinyWin && tinyWin.getSelection ? tinyWin.getSelection() : null;
     const selText = sel && !sel.isCollapsed ? sel.toString().trim() : '';
     let clickInSelection = false;
     if (selText && sel.rangeCount) {
       try {
         const rng = sel.getRangeAt(0);
-        // Does the click target fall within the selection range?
         clickInSelection = rng.intersectsNode ? rng.intersectsNode(tgt) : true;
       } catch { clickInSelection = true; }
     }
-    if (selText && clickInSelection) {
+    if (selText && clickInSelection && !inCell) {
       dbg('deliberate selection, length=', selText.length);
       claim('wrap-selection');
       openWrapMenu(sel, selText, e.clientX, e.clientY);
       return;
     }
+    const hasSelection = !!(selText && selText.trim().length > 0);
 
-    // Resolve targets.
-    const iEl    = tgt.closest && tgt.closest('i[class*="bi-"]');
-    const iconColEl = tgt.closest && tgt.closest('.icon-column');
-    const iconHeadingEl = tgt.closest && tgt.closest('.icon-heading');
-    const cardEl = tgt.closest && tgt.closest('.card');
-    const revealEl = tgt.closest && tgt.closest('.reveal-container');
-    const imgEl  = tgt.closest && tgt.closest('img');
-    const rowEl  = tgt.closest && tgt.closest('.row.wysiwyg-mode');
-    // A YouTube iframe whose src can be switched to the privacy domain.
-    const ytIframe = tgt.closest && tgt.closest('iframe[src*="youtube.com/embed/"], iframe[src*="youtube-nocookie.com/embed/"]');
-    const linkEl = tgt.closest && tgt.closest('a[href]');
-    const pdfEmbedEl = tgt.closest && tgt.closest('.pdf-container');
-    let convEl = tgt.closest && tgt.closest(
-      '.accordion, .horizontal-tabs, .vertical-tabs-wrapper, .flip-cards, ' +
-      '.text-carousel, .image-carousel, .reveal-table');
+    const x = e.clientX, y = e.clientY;
+    const COMP_SEL = '.accordion, .horizontal-tabs, .vertical-tabs-wrapper, .flip-cards, ' +
+                     '.text-carousel, .image-carousel, .reveal-table';
+    const YT_SEL = 'iframe[src*="youtube.com/embed/"], iframe[src*="youtube-nocookie.com/embed/"]';
 
-    // Clicking inside a horizontal tab's CONTENT pane lands in the sibling
-    // .tab-content, which isn't matched above. Map it back to the owning tab
-    // component (the <ul.horizontal-tabs> sibling, or the .vertical-tabs-wrapper
-    // ancestor) so item-ops are reachable from the pane too, not just the label.
-    if (!convEl && tgt.closest) {
-      const tc = tgt.closest('.tab-content');
-      if (tc) {
-        const wrapper = tc.closest('.vertical-tabs-wrapper');
-        if (wrapper) convEl = wrapper;
-        else {
-          // horizontal: find the sibling <ul class="horizontal-tabs"> in the same parent
-          const parent = tc.parentElement;
-          const ul = parent && parent.querySelector('.horizontal-tabs');
-          if (ul) convEl = ul;
-        }
+    // Returns [label, opener] for a node, or null. Checked deepest-first.
+    function routeFor(n) {
+      // Animated-icon heading (the <animated-icons> element itself is not
+      // clickable in edit mode, so the heading beside it stands in for it).
+      if (n.matches('.icon-heading')) return ['animated-icon-header-menu', () => openAnimatedIconHeaderMenu(n, x, y)];
+      // Icon in a card's icon-column belongs to the card menu (it has "Change icon…").
+      if (n.matches('.icon-column') && n.closest('.card')) return ['card-menu (icon column)', () => openCardMenu(n.closest('.card'), x, y)];
+      if (n.matches('i[class*="bi-"]')) {
+        const col = n.closest('.icon-column');
+        if (col && col.closest('.card')) return ['card-menu (icon column)', () => openCardMenu(col.closest('.card'), x, y)];
+        return ['icon-swap', () => openIconModal(n)];
+      }
+      if (n.matches('td, th')) return ['table-cell', () => openTableMenu(n, x, y)];
+      if (n.matches('img')) return ['image-options', () => openImageMenu(n, x, y)];
+      if (n.matches('iframe')) {
+        if (n.matches(YT_SEL)) return ['youtube-menu', () => openYouTubeMenu(n, x, y)];
+        const pdf = n.closest('.pdf-container');
+        if (pdf) return ['pdf-embed-menu', () => openPdfEmbedMenu(pdf, x, y)];
+        return ['iframe-menu', () => openIframeMenu(n, x, y)];
+      }
+      if (n.matches('a[href]') && !hasSelection) return ['link-menu', () => openLinkMenu(n, x, y)];
+      if (n.matches('.pdf-container')) return ['pdf-embed-menu', () => openPdfEmbedMenu(n, x, y)];
+      if (n.matches('.reveal-container')) return ['reveal-menu', () => openRevealMenu(n, tgt, x, y)];
+      if (n.matches('.card')) return ['card-menu', () => openCardMenu(n, x, y, tgt)];
+      if (n.matches(COMP_SEL)) return ['component-menu', () => openComponentMenu(n, tgt, x, y)];
+      // A horizontal tab's content pane is a sibling of its <ul>, so map it
+      // back to the owning tab component.
+      if (n.matches('.tab-content')) {
+        const wrapper = n.closest('.vertical-tabs-wrapper');
+        const owner = wrapper || (n.parentElement && n.parentElement.querySelector('.horizontal-tabs'));
+        if (owner) return ['component-menu (tab pane)', () => openComponentMenu(owner, tgt, x, y)];
+      }
+      // Rows. The row inside a reveal item is part of the reveal, not a page row.
+      if (n.matches('.row.wysiwyg-mode') && !(n.parentElement && n.parentElement.matches('.reveal-container'))) {
+        return ['row-menu', () => openRowMenu(n, x, y, tgt)];
+      }
+      return null;
+    }
+
+    const stop = tinyDoc && tinyDoc.body;
+    for (let n = startEl; n && n !== stop; n = n.parentElement) {
+      const hit = routeFor(n);
+      if (hit) {
+        claim(hit[0]);
+        hit[1]();
+        return;
       }
     }
 
-    // Priority 0.8: the heading beside an animated icon -> swap/remove menu.
-    // (Can't target the <animated-icons> element itself — it only renders at
-    // runtime via lottie-web, so it's invisible/unclickable in edit mode.)
-    if (iconHeadingEl) {
-      claim('animated-icon-header-menu');
-      openAnimatedIconHeaderMenu(iconHeadingEl, e.clientX, e.clientY);
-      return;
-    }
-    // Priority 0.9: an icon INSIDE a card's icon-column -> card menu, not the
-    // generic icon-swap modal.
-    if (iconColEl && iconColEl.closest('.card')) {
-      claim('card-menu (icon column)');
-      openCardMenu(iconColEl.closest('.card'), e.clientX, e.clientY);
-      return;
-    }
-    // Priority 1: an icon -> icon swap
-    if (iEl) {
-      claim('icon-swap');
-      openIconModal(iEl);
-      return;
-    }
-    // Priority 1.35: a card (not on its icon) -> variant/icon menu.
-    // A reveal nested inside the card wins over the card (handled at 1.47).
-    if (cardEl && !(revealEl && cardEl.contains(revealEl))) {
-      claim('card-menu');
-      openCardMenu(cardEl, e.clientX, e.clientY, tgt);
-      return;
-    }
-
-    // Priority 1.2: an image -> image options (figure/caption, decorative).
-    if (imgEl) {
-      claim('image-options');
-      openImageMenu(imgEl, e.clientX, e.clientY);
-      return;
-    }
-
-    // Priority 1.3: a YouTube iframe -> offer privacy-domain toggle.
-    if (ytIframe) {
-      claim('youtube-menu');
-      openYouTubeMenu(ytIframe, e.clientX, e.clientY);
-      return;
-    }
-
-    // Priority 1.4: a link (and no text selected) -> link options.
-    const hasSelection = sel && !sel.isCollapsed && selText && selText.trim().length > 0;
-    if (linkEl && !hasSelection) {
-      claim('link-menu');
-      openLinkMenu(linkEl, e.clientX, e.clientY);
-      return;
-    }
-
-    // Priority 1.45: a PDF embed -> offer a download link + ratio tweak.
-    if (pdfEmbedEl) {
-      claim('pdf-embed-menu');
-      openPdfEmbedMenu(pdfEmbedEl, e.clientX, e.clientY);
-      return;
-    }
-
-    // Priority 1.46: any other iframe embed (D2L media player, H5P, etc.) not
-    // caught by the YouTube or PDF-embed branches above.
-    const genIframe = tgt.closest && tgt.closest('iframe');
-    if (genIframe) {
-      claim('iframe-menu');
-      openIframeMenu(genIframe, e.clientX, e.clientY);
-      return;
-    }
-
-    // Priority 1.47: a Click and Reveal item (button or content) -> reveal
-    // menu. Wins over an enclosing component so a reveal nested in one is
-    // still reachable.
-    if (revealEl && (!convEl || convEl.contains(revealEl))) {
-      claim('reveal-menu');
-      openRevealMenu(revealEl, tgt, e.clientX, e.clientY);
-      return;
-    }
-
-    // Priority 1.5: a convertible/structured component -> component menu.
-    // This combines item-ops (delete/move the specific item clicked), convert,
-    // and duplicate-component into one menu.
-    if (convEl) {
-      claim('component-menu');
-      openComponentMenu(convEl, tgt, e.clientX, e.clientY);
-      return;
-    }
-
-    // (Paragraph -> columns is now part of the wrap-selection menu: select the
-    // text and Alt+right-click. No separate paragraph branch needed.)
-
-    // Priority 3: a row -> row menu (colour + insert-row-here live here now).
-    // Gutter-edge detection was removed: diagnostics proved the space beside a
-    // row belongs to .container, not the row, so edge clicks never landed on it.
-    if (rowEl) {
-      claim('row-menu');
-      openRowMenu(rowEl, e.clientX, e.clientY, tgt);
-      return;
-    }
-
-    // Priority 4: not on a row, but Alt+RC in the editor body (e.g. the gap
-    // between rows) -> offer "insert row here" at the caret.
+    // Nothing under the cursor (e.g. the gap between rows) -> insert row at caret.
     claim('insert-row-here (no row under cursor)');
-    openInsertRowMenu(e.clientX, e.clientY);
+    openInsertRowMenu(x, y);
   }
 
   // (Paragraph→columns menu removed — these conversions now live in the
