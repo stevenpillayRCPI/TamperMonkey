@@ -5,7 +5,7 @@
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      8.8
+// @version      8.9
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -4553,6 +4553,16 @@
       return;
     }
 
+    // Priority 1.47: a Click and Reveal item (button or content) -> reveal
+    // menu. Wins over an enclosing component so a reveal nested in one is
+    // still reachable.
+    const revealEl = tgt.closest && tgt.closest('.reveal-container');
+    if (revealEl && (!convEl || convEl.contains(revealEl))) {
+      claim('reveal-menu');
+      openRevealMenu(revealEl, tgt, e.clientX, e.clientY);
+      return;
+    }
+
     // Priority 1.5: a convertible/structured component -> component menu.
     // This combines item-ops (delete/move the specific item clicked), convert,
     // and duplicate-component into one menu.
@@ -5837,7 +5847,7 @@ function addParagraphToRow(rowEl) {
   const BB_MENU_IDS = ['bb-row-menu', 'bb-insertrow-menu', 'bb-insertcomponent-menu', 'bb-wrap-menu', 'bb-image-menu',
     'bb-component-menu', 'bb-convert-menu', 'bb-table-menu', 'bb-icon-menu',
     'bb-pdf-menu', 'bb-youtube-menu', 'bb-link-menu', 'bb-pdf-embed-menu', 'bb-card-menu',
-    'bb-animated-icon-menu', 'bb-iframe-menu', 'bb-wrapin-menu'];
+    'bb-animated-icon-menu', 'bb-iframe-menu', 'bb-wrapin-menu', 'bb-reveal-menu'];
 
   // Close all BB context menus. When invoked from a document click we receive the
   // event: if that click landed *inside* one of our menus (e.g. on a button that
@@ -5865,6 +5875,65 @@ function addParagraphToRow(rowEl) {
       if (m) m.remove();
     });
     document.removeEventListener('keydown', anyMenuEsc);
+  }
+
+  // ─── CLICK AND REVEAL MENU ──────────────────────────────────────────────────
+  // Alt+right-click a reveal button or its content. Converts that one reveal
+  // (button text = heading, revealed content = body) to a single-item
+  // accordion (no "Open All"). Row options stay reachable from here.
+  function openRevealMenu(revealEl, tgt, x, y) {
+    closeAnyMenu();
+    const menu = document.createElement('div');
+    menu.id = 'bb-reveal-menu';
+    menu.className = 'bb-ctx-menu';
+    menu.innerHTML = `<div class="bb-ctx-title">Click and Reveal</div>`;
+    const conv = document.createElement('button');
+    conv.textContent = '→ Convert to single accordion';
+    conv.addEventListener('click', () => { revealToAccordion(revealEl); closeAnyMenu(); });
+    menu.appendChild(conv);
+    const rowEl = revealEl.closest('.row.wysiwyg-mode');
+    if (rowEl) {
+      const rowBtn = document.createElement('button');
+      rowBtn.textContent = '▸ Row options…';
+      rowBtn.addEventListener('click', (e) => { e.stopPropagation(); openRowMenu(rowEl, x, y, tgt); });
+      menu.appendChild(rowBtn);
+    }
+    positionMenu(menu, x, y);
+  }
+
+  function revealToAccordion(revealEl) {
+    const span = revealEl.querySelector('.reveal-button span[contenteditable="true"]') || revealEl.querySelector('.reveal-button');
+    const heading = (span ? span.textContent : '').trim() || 'Heading';
+    const collapse = revealEl.querySelector('.reveal-item .collapse') || revealEl.querySelector('.reveal-item');
+    const inner = collapse && collapse.querySelector('[contenteditable="true"]');
+    const bodyHTML = ((inner || collapse) ? (inner || collapse).innerHTML : '').trim() || '<p>Content </p>';
+    const id = uid('accordion');
+    const comp = `<div class="col-12"><div class="accordion" id="${id}">${TPL.accordionItem(id, 0, escapeHtml(heading), bodyHTML)}</div></div>`;
+
+    // Replace the whole row only if this reveal is all it holds; otherwise
+    // replace just the reveal so neighbouring content survives.
+    const rowEl = revealEl.closest('.row.wysiwyg-mode');
+    const media = 'img, iframe, table, .accordion, .card';
+    const soleContent = rowEl
+      && rowEl.querySelectorAll('.reveal-container').length === 1
+      && rowEl.textContent.trim() === revealEl.textContent.trim()
+      && rowEl.querySelectorAll(media).length === revealEl.querySelectorAll(media).length;
+    const html = soleContent ? TPL.wrapRow(comp) : comp;
+
+    const didWrite = tinyWrite(() => {
+      const tmp = tinyDoc.createElement('div');
+      tmp.innerHTML = html.trim();
+      (soleContent ? rowEl : revealEl).replaceWith(tmp.firstElementChild);
+    }, 'reveal -> single accordion', { ungated: true });
+
+    if (didWrite) {
+      toast('✓ Converted reveal to single accordion', 'success');
+      scheduleAudit();
+      refreshComponentList();
+    } else {
+      copyToClipboard(TPL.wrapRow(comp));
+      toast('✓ Accordion copied as a row — paste it, then delete the reveal', 'warn');
+    }
   }
 
   // ─── WRAP SELECTION ─────────────────────────────────────────────────────────
@@ -5917,16 +5986,6 @@ function addParagraphToRow(rowEl) {
     const id = uid('accordion');
     const item = TPL.accordionItem(id, 0, 'Heading', `<p>${escapeHtml(text)}</p>`);
     return TPL.wrapRow(TPL.accordion(id, item));
-  }
-
-  // Build a Click and Reveal item containing the selection as its body.
-  // Uses the library template (genRevealItem) so markup matches Insert.
-  function buildWrapReveal(text) {
-    const tmp = document.createElement('div');
-    tmp.innerHTML = TPL.wrapRow(genRevealItem()).trim();
-    const body = tmp.querySelector('.reveal-item [contenteditable="true"]');
-    if (body) body.innerHTML = `<p>${escapeHtml(text)}</p>`;
-    return tmp.innerHTML;
   }
 
   function buildWrapCard(variant, text) {
@@ -6457,7 +6516,6 @@ function addParagraphToRow(rowEl) {
 
     const opts = [
       { act: 'accordion',     label: 'Accordion (text = body)' },
-      { act: 'reveal',        label: 'Reveal item (text = body)' },
       { act: 'card-white',    label: 'Card — white' },
       { act: 'card-primary',  label: 'Card — primary' },
       { act: 'card-secondary',label: 'Card — secondary' },
@@ -6595,7 +6653,6 @@ function addParagraphToRow(rowEl) {
   function doWrap(act, selText, savedRange) {
     let row;
     if (act === 'accordion') row = buildWrapAccordion(selText);
-    else if (act === 'reveal') row = buildWrapReveal(selText);
     else if (act === 'card-white') row = buildWrapCard('white', selText);
     else if (act === 'card-primary') row = buildWrapCard('primary', selText);
     else if (act === 'card-secondary') row = buildWrapCard('secondary', selText);
