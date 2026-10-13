@@ -5,7 +5,7 @@
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      8.7
+// @version      8.8
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -5919,6 +5919,16 @@ function addParagraphToRow(rowEl) {
     return TPL.wrapRow(TPL.accordion(id, item));
   }
 
+  // Build a Click and Reveal item containing the selection as its body.
+  // Uses the library template (genRevealItem) so markup matches Insert.
+  function buildWrapReveal(text) {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = TPL.wrapRow(genRevealItem()).trim();
+    const body = tmp.querySelector('.reveal-item [contenteditable="true"]');
+    if (body) body.innerHTML = `<p>${escapeHtml(text)}</p>`;
+    return tmp.innerHTML;
+  }
+
   function buildWrapCard(variant, text) {
     const live = findLiveByType(['Icon Card']); // any card row to clone structure
     // Prefer cloning a plain card of the same variant if present
@@ -6447,6 +6457,7 @@ function addParagraphToRow(rowEl) {
 
     const opts = [
       { act: 'accordion',     label: 'Accordion (text = body)' },
+      { act: 'reveal',        label: 'Reveal item (text = body)' },
       { act: 'card-white',    label: 'Card — white' },
       { act: 'card-primary',  label: 'Card — primary' },
       { act: 'card-secondary',label: 'Card — secondary' },
@@ -6584,6 +6595,7 @@ function addParagraphToRow(rowEl) {
   function doWrap(act, selText, savedRange) {
     let row;
     if (act === 'accordion') row = buildWrapAccordion(selText);
+    else if (act === 'reveal') row = buildWrapReveal(selText);
     else if (act === 'card-white') row = buildWrapCard('white', selText);
     else if (act === 'card-primary') row = buildWrapCard('primary', selText);
     else if (act === 'card-secondary') row = buildWrapCard('secondary', selText);
