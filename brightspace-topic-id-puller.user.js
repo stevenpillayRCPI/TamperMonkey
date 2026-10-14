@@ -2,8 +2,8 @@
 // @name         Brightspace Topic ID Puller
 // @namespace    rcpi-dlt
 // @version      1.2
-// @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/Brightspace%20Topic%20ID%20Puller.user.js
-// @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/Brightspace%20Topic%20ID%20Puller.user.js
+// @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/brightspace-topic-id-puller.user.js
+// @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/brightspace-topic-id-puller.user.js
 // @description  Pull topic IDs from a Brightspace course. Tick whole units/lessons, filter by keyword, copy IDs, export CSVs (including for the bulk completion tool).
 // @match        *://*/d2l/*
 // @run-at       document-idle
@@ -338,7 +338,7 @@
         const p = pathOf(t);
         lines.push([p[0] || '', p.slice(1).join(' > '), t.title, t.type, t.id]);
       });
-      const csv = '\uFEFF' + lines.map(r => r.map(csvCell).join(',')).join('\r\n'); // BOM so Excel reads UTF-8
+      const csv = '﻿' + lines.map(r => r.map(csvCell).join(',')).join('\r\n'); // BOM so Excel reads UTF-8
 
       const stamp = new Date().toISOString().slice(0, 10);
       const a = document.createElement('a');

@@ -1,7 +1,7 @@
 # Block Builder Edit Toolkit
 
-> **File:** `Block-Builder-Edit-Toolkit.user.js`  
-> **Version:** 1.5
+> **File:** `edit-toolkit.user.js`  
+> **Version:** 9.1
 
 ## Overview
 

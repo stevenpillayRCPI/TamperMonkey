@@ -2,8 +2,8 @@
 // @name         D2L Image Alt Text Checker
 // @namespace    http://tampermonkey.net/
 // @version      1.1
-// @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/D2L%20Image%20Alt%20Text%20Checker.user.js
-// @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/D2L%20Image%20Alt%20Text%20Checker.user.js
+// @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/d2l-image-alt-text-checker.user.js
+// @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/d2l-image-alt-text-checker.user.js
 // @description  Check and display alt text from images in D2L iframe content
 // @author       You
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*

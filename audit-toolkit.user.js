@@ -3,7 +3,7 @@
 // @namespace    rcpi-content-audit
 // @description  View-mode content audit: WCAG a11y report, broken link/image checker, URL lint, DOI/PMID citation report, copyright/H5P image audit. Read-only — this script never writes to page or editor content; see the Edit Toolkit for fixes.
 // @match        https://brightspace.rcpi.ie/*
-// @version      4.8
+// @version      4.9
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/audit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/audit-toolkit.user.js
@@ -117,6 +117,23 @@
   // UI mounts on the real top document — position:fixed inside a nested
   // content iframe only pins to that iframe's own viewport otherwise.
   const uiMountDoc = S.findTopSameOriginDoc();
+
+  // Topics where the toolkit must not appear (Block Builder, Obesity designs).
+  // Matched on the TOP document's /topics/<id> URL, since this script runs
+  // inside the nested content iframe whose own URL has no topic id.
+  const EXCLUDED_TOPIC_IDS = ['88176', '84252'];
+  function isExcludedPage() {
+    try {
+      const m = uiMountDoc.location.pathname.match(/\/d2l\/le\/lessons\/\d+\/topics\/(\d+)/i);
+      return !!m && EXCLUDED_TOPIC_IDS.includes(m[1]);
+    } catch (e) { return false; }
+  }
+  function removePanel() {
+    ['rcpi-audit-panel', 'rcpi-audit-minbar'].forEach(id => {
+      const el = uiMountDoc.getElementById(id);
+      if (el) el.remove();
+    });
+  }
 
   // ─── localStorage HANDOFF (Edit Toolkit reads this) ─────────────────
   // Keyed by the shared core's canonical topic key so the Edit Toolkit,
@@ -576,6 +593,7 @@
   }
 
   function mount() {
+    if (isExcludedPage()) { removePanel(); return; }
     injectAuditCss(uiMountDoc);
     const tabs = [
       { id: 'a11y', label: 'Accessibility', render: renderA11yTab },
@@ -675,10 +693,11 @@
   // re-runs the script, so the panel and its captured references go
   // stale. Poll for a pathname change and remount instead of relying on
   // a full reload.
-  let lastPath = location.pathname;
+  const pathKey = () => location.pathname + '|' + (function () { try { return uiMountDoc.location.pathname; } catch (e) { return ''; } })();
+  let lastPath = pathKey();
   setInterval(() => {
-    if (location.pathname === lastPath) return;
-    lastPath = location.pathname;
+    if (pathKey() === lastPath) return;
+    lastPath = pathKey();
     if (computeIsViewPath()) {
       try { mount(); } catch (e) { console.error('[rcpi-audit] remount on nav failed', e); }
     }

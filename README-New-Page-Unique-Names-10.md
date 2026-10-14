@@ -1,6 +1,6 @@
 # New Page Unique Names
 
-> **File:** `New-Page-Unique-Names.user-10.js`  
+> **File:** `new-page-unique-names.user.js`  
 > **Version:** 1.1
 
 ## Overview

@@ -1,6 +1,6 @@
 # RCPI Block Builder Standalone
 
-> **File:** `RCPI-Block-Builder-Standalone.user-11.js`  
+> **File:** `rcpi-block-builder-standalone.user.js`  
 > **Version:** 2.0
 
 ## Overview

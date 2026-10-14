@@ -4,8 +4,8 @@
 // @description  On the Import/Export/Copy Components pages: as soon as a SOURCE (sending) course is chosen, compares its course-file paths against the TARGET (receiving) course and warns about files that would be overwritten. Tiers hits into "overwrites a LIVE topic" vs "overwrites a stored file". Slim bottom banner fires ASAP; click for detail + CSV. Companion to the v2.x single-course duplicate-file detector.
 // @match        https://brightspace.rcpi.ie/d2l/lms/importExport/*
 // @version      1.1
-// @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/RCPI%20Brightspace%20%E2%80%93%20Pre-Copy%20Overwrite%20Guard.user.js
-// @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/RCPI%20Brightspace%20%E2%80%93%20Pre-Copy%20Overwrite%20Guard.user.js
+// @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-brightspace-pre-copy-overwrite-guard.user.js
+// @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-brightspace-pre-copy-overwrite-guard.user.js
 // @run-at       document-idle
 // @grant        none
 // ==/UserScript==

@@ -5,8 +5,8 @@
 // @match        https://elements.envato.com/*
 // @match        https://app.envato.com/*
 // @version      1.4
-// @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/Envato%20Elements%20%E2%80%94%20Resize%20%26%20Copy.user.js
-// @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/Envato%20Elements%20%E2%80%94%20Resize%20%26%20Copy.user.js
+// @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/envato-elements-resize-copy.user.js
+// @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/envato-elements-resize-copy.user.js
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
 // @connect      dam-assets.envatousercontent.com

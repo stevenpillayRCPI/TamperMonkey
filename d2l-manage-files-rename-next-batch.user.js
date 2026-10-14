@@ -2,8 +2,8 @@
 // @name         D2L Manage Files Rename Next Batch
 // @namespace    http://tampermonkey.net/
 // @version      3.0
-// @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/D2L%20Manage%20Files%20Rename%20Next%20Batch.user.js
-// @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/D2L%20Manage%20Files%20Rename%20Next%20Batch.user.js
+// @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/d2l-manage-files-rename-next-batch.user.js
+// @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/d2l-manage-files-rename-next-batch.user.js
 // @description  Staged rollout batch renamer for Brightspace Manage Files. Renames visible HTML files using Last Modified date. Supports rename-all with chunked execution, live progress, and cancellation.
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
 // @run-at       document-idle

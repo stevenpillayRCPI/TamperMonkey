@@ -2,8 +2,8 @@
 // @name         Enter Timer With Countdown
 // @namespace    http://tampermonkey.net/
 // @version      1.1
-// @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/Enter%20Timer%20With%20Countdown.user.js
-// @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/Enter%20Timer%20With%20Countdown.user.js
+// @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/enter-timer-with-countdown.user.js
+// @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/enter-timer-with-countdown.user.js
 // @description  Shows a countdown and presses Enter on the currently focused element
 // @match        *://*/*
 // @run-at       document-idle

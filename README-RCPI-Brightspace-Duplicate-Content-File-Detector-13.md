@@ -1,6 +1,6 @@
 # RCPI Brightspace Duplicate Content File Detector
 
-> **File:** `RCPI-Brightspace-Duplicate-Content-File-Detector.user-13.js`  
+> **File:** `rcpi-brightspace-duplicate-content-file-detector.user.js`  
 > **Version:** 2.4
 
 ## Overview

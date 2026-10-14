@@ -1,6 +1,6 @@
 # RCPI Staff Login Button Clicker
 
-> **File:** `RCPI-Staff-Login-Button-Clicker.user-19.js`  
+> **File:** `rcpi-staff-login-button-clicker.user.js`  
 > **Version:** 0.1
 
 ## Overview

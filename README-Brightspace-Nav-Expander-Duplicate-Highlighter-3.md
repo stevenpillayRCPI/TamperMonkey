@@ -1,6 +1,6 @@
 # Brightspace Nav Expander & Duplicate Highlighter
 
-> **File:** `Brightspace-Nav-Expander-Duplicate-Highlighter.user-3.js`  
+> **File:** `brightspace-nav-expander-duplicate-highlighter.user.js`  
 > **Version:** 2.0
 
 ## Overview

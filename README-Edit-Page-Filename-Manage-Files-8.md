@@ -1,6 +1,6 @@
 # Edit Page Filename & Manage Files
 
-> **File:** `Edit-Page-Filename-Manage-Files.user-8.js`  
+> **File:** `edit-page-filename-manage-files.user.js`  
 > **Version:** 6.2
 
 ## Overview

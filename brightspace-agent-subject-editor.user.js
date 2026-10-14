@@ -2,8 +2,8 @@
 // @name         Brightspace Agent Subject Editor
 // @namespace    http://tampermonkey.net/
 // @version      1.0
-// @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/Brightspace%20Agent%20Subject%20Editor.user.js
-// @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/Brightspace%20Agent%20Subject%20Editor.user.js
+// @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/brightspace-agent-subject-editor.user.js
+// @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/brightspace-agent-subject-editor.user.js
 // @description  Edits the email subject in Brightspace Intelligent Agents
 // @author       Your Name
 // @match        https://brightspace.rcpi.ie/d2l/le/intelligentagents/agent/*/Edit*

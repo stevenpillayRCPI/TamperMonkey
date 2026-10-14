@@ -1,6 +1,6 @@
 # RCPI Brightspace Suspicious / At-Risk Linked Filenames
 
-> **File:** `RCPI-Brightspace-Suspicious-At-Risk-Linked-Filenames.user-16.js`  
+> **File:** `rcpi-brightspace-suspicious-at-risk-linked-filenames.user.js`  
 > **Version:** 1.0
 
 ## Overview

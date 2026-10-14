@@ -4,8 +4,8 @@
 // @description  Finds nav objects (topics) in a single course that point at the same content file (e.g. Untitled.html clobbered by an import). Compact on-page report; highlights clashes where titles differ; optional CSV download.
 // @match        https://brightspace.rcpi.ie/d2l/*
 // @version      2.4
-// @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/RCPI%20Brightspace%20%E2%80%93%20Duplicate%20Content-File%20Detector.user.js
-// @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/RCPI%20Brightspace%20%E2%80%93%20Duplicate%20Content-File%20Detector.user.js
+// @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-brightspace-duplicate-content-file-detector.user.js
+// @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-brightspace-duplicate-content-file-detector.user.js
 // @run-at       document-idle
 // @grant        none
 // ==/UserScript==

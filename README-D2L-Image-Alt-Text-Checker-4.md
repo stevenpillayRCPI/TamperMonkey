@@ -1,6 +1,6 @@
 # D2L Image Alt Text Checker
 
-> **File:** `D2L-Image-Alt-Text-Checker.user-4.js`  
+> **File:** `d2l-image-alt-text-checker.user.js`  
 > **Version:** 1.1
 
 ## Overview

@@ -4,8 +4,8 @@
 // @description  Fetches every linked HTML page in a course, extracts its <a href>, <img src> and CSS url() references, and probes each for broken links/images. Uses GM_xmlhttpRequest to bypass CORS on external URLs. Modal report + CSV.
 // @match        https://brightspace.rcpi.ie/d2l/*
 // @version      1.5
-// @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/RCPI%20Brightspace%20%E2%80%93%20Broken%20Links%20%26%20Images%20in%20Content%20Pages.user.js
-// @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/RCPI%20Brightspace%20%E2%80%93%20Broken%20Links%20%26%20Images%20in%20Content%20Pages.user.js
+// @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-brightspace-broken-links-images-in-content-pages.user.js
+// @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-brightspace-broken-links-images-in-content-pages.user.js
 // @grant        GM_xmlhttpRequest
 // @connect      *
 // @run-at       document-idle

@@ -1,7 +1,7 @@
 # RCPI Brightspace Audit Toolkit
 
-> **File:** `RCPI-Brightspace-Audit-Toolkit.user-17.js`  
-> **Version:** 3.1
+> **File:** `audit-toolkit.user.js`  
+> **Version:** 4.8
 
 ## Overview
 

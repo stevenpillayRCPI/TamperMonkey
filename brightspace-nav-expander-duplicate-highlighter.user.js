@@ -2,8 +2,8 @@
 // @name         Brightspace Nav Expander + Duplicate Highlighter
 // @namespace    http://tampermonkey.net/
 // @version      2.0
-// @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/Brightspace%20Nav%20Expander%20%2B%20Duplicate%20Highlighter.user.js
-// @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/Brightspace%20Nav%20Expander%20%2B%20Duplicate%20Highlighter.user.js
+// @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/brightspace-nav-expander-duplicate-highlighter.user.js
+// @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/brightspace-nav-expander-duplicate-highlighter.user.js
 // @description  Expands all nav items recursively and highlights duplicate object IDs
 // @author       You
 // @match        https://brightspace.rcpi.ie/*

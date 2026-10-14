@@ -1,7 +1,7 @@
 # RCPI Brightspace Pre-Copy Overwrite Guard
 
-> **File:** `RCPI-Brightspace-Pre-Copy-Overwrite-Guard.user-15.js`  
-> **Version:** unknown
+> **File:** `rcpi-brightspace-pre-copy-overwrite-guard.user.js`  
+> **Version:** 1.1
 
 ## Overview
 

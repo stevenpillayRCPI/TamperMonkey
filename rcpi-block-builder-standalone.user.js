@@ -1,12 +1,12 @@
 // ==UserScript==
-// @name         RCPI Obesity Designs Standalone
-// @namespace    rcpi-third-tool
-// @description  Standalone third iframe pane for Brightspace.
+// @name         RCPI Block Builder Standalone
+// @namespace    rcpi-block-builder
+// @description  Standalone Block Builder pane for Brightspace, independent of the Edit Toolkit FAB.
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
-// @version      1.0
-// @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/RCPI%20Obesity%20Designs%20Standalone.user.js
-// @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/RCPI%20Obesity%20Designs%20Standalone.user.js
+// @version      2.0
+// @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-block-builder-standalone.user.js
+// @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-block-builder-standalone.user.js
 // @grant        none
 // @run-at       document-idle
 // ==/UserScript==
@@ -14,15 +14,15 @@
 (function () {
   'use strict';
 
-  const THIRD_IFRAME_URL = 'https://brightspace.rcpi.ie/content/enforced/13933-COURSEREDESIGN_18AUG2025/Designs.html';
-  const THIRD_TITLE = 'Obesity Designs';
+  const BLOCK_BUILDER_URL =
+    'https://brightspace.rcpi.ie/content/enforced/11796-COURSEREDESIGN_06JAN2024/RCPI-BS-Block-Builder.html';
 
-  const STORAGE_KEY = 'rcpi-third-tool-width';
+  const STORAGE_KEY = 'rcpi-block-builder-width';
   const MIN_WIDTH = 420;
   const MAX_WIDTH_RATIO = 0.92;
   const DEFAULT_WIDTH = 770;
 
-  let panelEl = null;
+  let bbPanelEl = null;
   let lastUrl = location.pathname + location.search;
   let currentWidth = loadSavedWidth();
 
@@ -52,23 +52,26 @@
   }
 
   function injectStyles() {
-    if (document.getElementById('rcpi-third-tool-style')) return;
+    if (document.getElementById('rcpi-block-builder-style')) return;
 
     const style = document.createElement('style');
-    style.id = 'rcpi-third-tool-style';
+    style.id = 'rcpi-block-builder-style';
     style.textContent = `
-      .rcpi-third-fab {
+    .rcpi-bb-pane { z-index: 2001 !important; }
+.rcpi-bb-fab  { z-index: 2000 !important; }
+
+      .rcpi-bb-fab {
         position: fixed !important;
         bottom: 18px !important;
-        right: 322px !important;
+        right: 170px !important;
         z-index: 2000 !important;
       }
 
-      .rcpi-third-fab button {
+      .rcpi-bb-fab button {
         padding: 9px 14px;
         border-radius: 6px;
         border: 2px solid #fff;
-        background: #7a2f8f;
+        background: #057;
         color: #fff;
         cursor: pointer;
         font: 13px system-ui, Arial, sans-serif;
@@ -76,7 +79,7 @@
         white-space: nowrap;
       }
 
-      .rcpi-third-pane {
+      .rcpi-bb-pane {
         position: fixed;
         top: 0;
         right: 0;
@@ -90,7 +93,7 @@
         border-left: 1px solid #d0d0d0;
       }
 
-      .rcpi-third-pane .rcpi-hd {
+      .rcpi-bb-pane .rcpi-hd {
         padding: 12px 16px;
         border-bottom: 1px solid #e2e2e2;
         display: flex;
@@ -100,13 +103,13 @@
         flex: 0 0 auto;
       }
 
-      .rcpi-third-pane .rcpi-hd h2 {
+      .rcpi-bb-pane .rcpi-hd h2 {
         margin: 0;
         font-size: 14px;
         font-weight: 600;
       }
 
-      .rcpi-third-head {
+      .rcpi-bb-head {
         display: flex;
         align-items: center;
         gap: 10px;
@@ -114,7 +117,7 @@
         min-width: 0;
       }
 
-      .rcpi-third-size {
+      .rcpi-bb-size {
         display: inline-flex;
         align-items: center;
         gap: 6px;
@@ -124,7 +127,7 @@
         white-space: nowrap;
       }
 
-      .rcpi-third-size input {
+      .rcpi-bb-size input {
         width: 74px;
         padding: 4px 6px;
         border: 1px solid #bbb;
@@ -134,20 +137,20 @@
         line-height: 1.2;
       }
 
-      .rcpi-third-actions {
+      .rcpi-bb-actions {
         display: flex;
         align-items: center;
         gap: 6px;
         flex: 0 0 auto;
       }
 
-      .rcpi-third-pane .rcpi-bd {
+      .rcpi-bb-pane .rcpi-bd {
         flex: 1;
         overflow: hidden;
         padding: 0 !important;
       }
 
-      .rcpi-third-frame {
+      .rcpi-bb-frame {
         width: 100%;
         height: 100%;
         border: 0;
@@ -175,10 +178,10 @@
     document.head.appendChild(style);
   }
 
-  function closePanel() {
-    if (!panelEl) return;
-    panelEl.remove();
-    panelEl = null;
+  function closeBlockBuilderPanel() {
+    if (!bbPanelEl) return;
+    bbPanelEl.remove();
+    bbPanelEl = null;
   }
 
   function applyPaneWidth(pane, input, value) {
@@ -189,46 +192,47 @@
     if (input) input.value = String(width);
   }
 
-  function openPanel() {
-    if (panelEl) {
-      closePanel();
+
+  function openBlockBuilderPanel() {
+    if (bbPanelEl) {
+      closeBlockBuilderPanel();
       return;
     }
 
     const pane = document.createElement('div');
-    pane.className = 'rcpi-third-pane';
+    pane.className = 'rcpi-bb-pane';
     pane.style.width = `${clampWidth(currentWidth)}px`;
-    panelEl = pane;
+    bbPanelEl = pane;
 
     pane.innerHTML = `
       <div class="rcpi-hd">
-        <div class="rcpi-third-head">
-          <h2>${THIRD_TITLE}</h2>
-          <label class="rcpi-third-size">
+        <div class="rcpi-bb-head">
+          <h2>Block Builder</h2>
+          <label class="rcpi-bb-size">
             Width
             <input type="text" value="${clampWidth(currentWidth)}" inputmode="numeric" />
             <span>px</span>
             <button type="button" class="rcpi-btn sec" data-apply-width>Set</button>
           </label>
         </div>
-        <div class="rcpi-third-actions">
+        <div class="rcpi-bb-actions">
           <button class="rcpi-btn sec" data-close>Close</button>
         </div>
       </div>
       <div class="rcpi-bd">
         <iframe
-          class="rcpi-third-frame"
-          src="${THIRD_IFRAME_URL}"
+          class="rcpi-bb-frame"
+          src="${BLOCK_BUILDER_URL}"
           allowfullscreen
         ></iframe>
       </div>
     `;
 
     const closeBtn = pane.querySelector('[data-close]');
-    const widthInput = pane.querySelector('.rcpi-third-size input');
+    const widthInput = pane.querySelector('.rcpi-bb-size input');
     const applyBtn = pane.querySelector('[data-apply-width]');
 
-    closeBtn.addEventListener('click', closePanel);
+    closeBtn.addEventListener('click', closeBlockBuilderPanel);
 
     applyBtn.addEventListener('click', () => {
       applyPaneWidth(pane, widthInput, widthInput.value);
@@ -248,20 +252,20 @@
     document.body.appendChild(pane);
   }
 
-  function mountFab() {
-    if (document.querySelector('.rcpi-third-fab')) return;
+  function mountBlockBuilderFab() {
+    if (document.querySelector('.rcpi-bb-fab')) return;
 
     const fab = document.createElement('div');
-    fab.className = 'rcpi-third-fab';
-    fab.innerHTML = `<button type="button">${THIRD_TITLE}</button>`;
+    fab.className = 'rcpi-bb-fab';
+    fab.innerHTML = `<button type="button">Block Builder</button>`;
 
-    fab.querySelector('button').addEventListener('click', openPanel);
+    fab.querySelector('button').addEventListener('click', openBlockBuilderPanel);
     document.body.appendChild(fab);
   }
 
   function ensureMounted() {
     injectStyles();
-    mountFab();
+    mountBlockBuilderFab();
   }
 
   ensureMounted();
@@ -274,7 +278,7 @@
     const nowUrl = location.pathname + location.search;
     if (nowUrl !== lastUrl) {
       lastUrl = nowUrl;
-      closePanel();
+      closeBlockBuilderPanel();
       setTimeout(ensureMounted, 600);
     }
   }, 500);
@@ -282,9 +286,9 @@
   window.addEventListener('resize', () => {
     currentWidth = clampWidth(currentWidth);
     saveWidth(currentWidth);
-    if (panelEl) {
-      const input = panelEl.querySelector('.rcpi-third-size input');
-      applyPaneWidth(panelEl, input, currentWidth);
+    if (bbPanelEl) {
+      const input = bbPanelEl.querySelector('.rcpi-bb-size input');
+      applyPaneWidth(bbPanelEl, input, currentWidth);
     }
   });
 
@@ -292,11 +296,12 @@
     clearInterval(mountTimer);
     clearInterval(urlWatcher);
   });
-  document.addEventListener('keydown', (e) => {
+    document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
-  if (panelEl) {
-    panelEl.remove();
-    panelEl = null;
+  if (bbPanelEl) {
+    bbPanelEl.remove();
+    bbPanelEl = null;
   }
 });
+
 })();

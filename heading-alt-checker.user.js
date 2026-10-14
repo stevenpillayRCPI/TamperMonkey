@@ -2,8 +2,8 @@
 // @name         Heading & Alt Checker
 // @namespace    rcpi-heading-alt-checker
 // @version      1.0
-// @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/Heading%20%26%20Alt%20Checker.user.js
-// @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/Heading%20%26%20Alt%20Checker.user.js
+// @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/heading-alt-checker.user.js
+// @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/heading-alt-checker.user.js
 // @description  Lightweight spot-check for skipped heading levels and missing/empty image alt text on a Brightspace content page; logs details to console and shows an auto-hiding on-page summary.
 // @match        https://brightspace.rcpi.ie/content/*
 // @run-at       document-idle

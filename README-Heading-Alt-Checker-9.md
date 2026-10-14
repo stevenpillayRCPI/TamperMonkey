@@ -1,7 +1,7 @@
 # Heading Alt Checker
 
-> **File:** `Heading-Alt-Checker.user-9.js`  
-> **Version:** unknown
+> **File:** `heading-alt-checker.user.js`  
+> **Version:** 1.0
 
 ## Overview
 

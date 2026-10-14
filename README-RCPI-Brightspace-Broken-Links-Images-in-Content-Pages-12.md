@@ -1,6 +1,6 @@
 # RCPI Brightspace Broken Links & Images in Content Pages
 
-> **File:** `RCPI-Brightspace-Broken-Links-Images-in-Content-Pages.user-12.js`  
+> **File:** `rcpi-brightspace-broken-links-images-in-content-pages.user.js`  
 > **Version:** 1.5
 
 ## Overview

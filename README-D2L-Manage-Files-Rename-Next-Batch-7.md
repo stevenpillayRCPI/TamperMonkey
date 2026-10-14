@@ -1,7 +1,7 @@
 # D2L Manage Files Rename / Next Batch
 
-> **File:** `D2L-Manage-Files-Rename-Next-Batch.user-7.js`  
-> **Version:** unknown
+> **File:** `d2l-manage-files-rename-next-batch.user.js`  
+> **Version:** 3.0
 
 ## Overview
 

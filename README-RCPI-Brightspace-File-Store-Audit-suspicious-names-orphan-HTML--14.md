@@ -1,6 +1,6 @@
 # RCPI Brightspace File Store Audit (Suspicious Names & Orphan HTML)
 
-> **File:** `RCPI-Brightspace-File-Store-Audit-suspicious-names-orphan-HTML-.user-14.js`  
+> **File:** `rcpi-brightspace-file-store-audit-suspicious-names-orphan-html.user.js`  
 > **Version:** 1.0
 
 ## Overview

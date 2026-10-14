@@ -1,7 +1,7 @@
 # RCPI Obesity Designs Standalone
 
-> **File:** `RCPI-Obesity-Designs-Standalone.user-18.js`  
-> **Version:** unknown
+> **File:** `rcpi-obesity-designs-standalone.user.js`  
+> **Version:** 1.0
 
 ## Overview
 

@@ -4,8 +4,8 @@
 // @description  Flags content topics whose linked file has a suspicious name (Untitled*, *Copy*, index/summary/overview/introduction, etc.). Content API only — no Manage Files. On-page report + CSV.
 // @match        https://brightspace.rcpi.ie/d2l/*
 // @version      1.0
-// @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/RCPI%20Brightspace%20%E2%80%93%20Suspicious%20-%20At%20Risk%20Linked%20Filenames.user.js
-// @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/RCPI%20Brightspace%20%E2%80%93%20Suspicious%20-%20At%20Risk%20Linked%20Filenames.user.js
+// @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-brightspace-suspicious-at-risk-linked-filenames.user.js
+// @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-brightspace-suspicious-at-risk-linked-filenames.user.js
 // @run-at       document-idle
 // @grant        none
 // ==/UserScript==

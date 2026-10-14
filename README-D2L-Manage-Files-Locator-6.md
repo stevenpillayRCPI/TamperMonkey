@@ -1,6 +1,6 @@
 # D2L Manage Files Locator
 
-> **File:** `D2L-Manage-Files-Locator.user-6.js`  
+> **File:** `d2l-manage-files-locator.user.js`  
 > **Version:** 1.3
 
 ## Overview

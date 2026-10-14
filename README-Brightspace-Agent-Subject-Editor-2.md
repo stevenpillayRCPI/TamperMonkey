@@ -1,6 +1,6 @@
 # Brightspace Agent Subject Editor
 
-> **File:** `Brightspace-Agent-Subject-Editor.user-2.js`  
+> **File:** `brightspace-agent-subject-editor.user.js`  
 > **Version:** 1.0
 
 ## Overview

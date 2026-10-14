@@ -1,7 +1,7 @@
 # D2L Manage Files Content Hierarchy
 
-> **File:** `D2L-Manage-Files-Content-Hierarchy-v4-.user-5.js`  
-> **Version:** 4.x
+> **File:** `d2l-manage-files-content-hierarchy-v4.user.js`  
+> **Version:** 4.0
 
 ## Overview
 
