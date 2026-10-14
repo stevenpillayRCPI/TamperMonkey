@@ -2,6 +2,8 @@
 // @name         New Page Unique Names
 // @namespace    http://tampermonkey.net/
 // @version      1.1
+// @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/New%20Page%20Unique%20Names.user.js
+// @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/New%20Page%20Unique%20Names.user.js
 // @description  On NEW pages only: slugifies filename on first save with date+uid, restores visible title, then completes original action.
 // @match        https://brightspace.rcpi.ie/*
 // @run-at       document-idle

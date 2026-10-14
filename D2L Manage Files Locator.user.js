@@ -2,6 +2,8 @@
 // @name         D2L Manage Files Locator
 // @namespace    http://tampermonkey.net/
 // @version      1.3
+// @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/D2L%20Manage%20Files%20Locator.user.js
+// @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/D2L%20Manage%20Files%20Locator.user.js
 // @description  Companion to "D2L Filename Display". Runs inside the Manage Files popup. Reads the target path handed off via localStorage, scrolls the legacy YUI file list (lazy-loaded), and highlights the matching file — navigating into subfolders first if the path has any. Does nothing if no fresh target is present (e.g. when you open Manage Files manually). v1.1: scroll the pane that holds the rows (multiple .dsl_p_m panes; tree was a decoy). v1.2: real subfolder navigation — folders are clicked by their name link (delegated JS handler), found by z_o_s row value, scrolling to load them.
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
 // @run-at       document-idle

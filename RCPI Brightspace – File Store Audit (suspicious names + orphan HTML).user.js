@@ -4,6 +4,8 @@
 // @description  Walks the whole course file store (Manage Files), flags suspicious filenames (Untitled*, Copy, New Document, generic defaults) and HTML pages linked by no topic. On-page report + CSV.
 // @match        https://brightspace.rcpi.ie/d2l/*
 // @version      1.0
+// @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/RCPI%20Brightspace%20%E2%80%93%20File%20Store%20Audit%20%28suspicious%20names%20%2B%20orphan%20HTML%29.user.js
+// @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/RCPI%20Brightspace%20%E2%80%93%20File%20Store%20Audit%20%28suspicious%20names%20%2B%20orphan%20HTML%29.user.js
 // @run-at       document-idle
 // @grant        none
 // ==/UserScript==

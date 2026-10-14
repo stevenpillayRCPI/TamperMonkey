@@ -2,6 +2,8 @@
 // @name         RCPI Staff Login Button Clicker
 // @namespace    http://tampermonkey.net/
 // @version      0.1
+// @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/RCPI%20Staff%20Login%20Button%20Clicker.user.js
+// @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/RCPI%20Staff%20Login%20Button%20Clicker.user.js
 // @description  Automatically clicks the RCPI Staff Login button
 // @author       You
 // @match        https://iam.rcpi.ie/*

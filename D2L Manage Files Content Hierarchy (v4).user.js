@@ -2,6 +2,8 @@
 // @name         D2L Manage Files Content Hierarchy (v4)
 // @namespace    http://tampermonkey.net/
 // @version      4.0
+// @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/D2L%20Manage%20Files%20Content%20Hierarchy%20%28v4%29.user.js
+// @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/D2L%20Manage%20Files%20Content%20Hierarchy%20%28v4%29.user.js
 // @description  Fast parallel Manage Files annotator. Discovers content hierarchy concurrently, re-annotates on any table change (sort, reorder, lazy-load), no stale DOM references.
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
 // @run-at       document-idle

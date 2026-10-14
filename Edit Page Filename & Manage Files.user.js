@@ -2,6 +2,8 @@
 // @name         Edit Page Filename & Manage Files
 // @namespace    http://tampermonkey.net/
 // @version      6.2
+// @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/Edit%20Page%20Filename%20%26%20Manage%20Files.user.js
+// @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/Edit%20Page%20Filename%20%26%20Manage%20Files.user.js
 // @description  On existing pages: reads the topic id from the URL, GETs the documented content-topic endpoint, and shows the real backend filename from its Url. The "Manage Files" button hands the target path to the companion Locator script via localStorage, then opens the Manage Files popup. v6.1: self-heals the label when the Lit title component re-renders/swaps during load (fixes flash-then-vanish), and dedupes inside the host's shadow root. No sniffing, no base64.
 // @match        https://brightspace.rcpi.ie/*
 // @run-at       document-start

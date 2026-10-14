@@ -2,6 +2,8 @@
 // @name         Brightspace Topic ID Puller
 // @namespace    rcpi-dlt
 // @version      1.2
+// @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/Brightspace%20Topic%20ID%20Puller.user.js
+// @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/Brightspace%20Topic%20ID%20Puller.user.js
 // @description  Pull topic IDs from a Brightspace course. Tick whole units/lessons, filter by keyword, copy IDs, export CSVs (including for the bulk completion tool).
 // @match        *://*/d2l/*
 // @run-at       document-idle

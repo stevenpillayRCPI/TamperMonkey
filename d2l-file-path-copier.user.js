@@ -2,6 +2,8 @@
 // @name         D2L File Path Copier
 // @namespace    http://tampermonkey.net/
 // @version      1.1
+// @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/d2l-file-path-copier.user.js
+// @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/d2l-file-path-copier.user.js
 // @description  In Manage Files and Public Files, adds a "Show Path" button to each file row. Clicking it displays the full enforced path, full URL, and a ready-to-paste HTML snippet (<img> for images, <a> for everything else) — each with its own Copy button.
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/publicfiles/*
