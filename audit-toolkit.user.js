@@ -3,7 +3,7 @@
 // @namespace    rcpi-content-audit
 // @description  View-mode content audit: WCAG a11y report, broken link/image checker, URL lint, DOI/PMID citation report, copyright/H5P image audit. Read-only — this script never writes to page or editor content; see the Edit Toolkit for fixes.
 // @match        https://brightspace.rcpi.ie/*
-// @version      4.9
+// @version      5.0
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/audit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/audit-toolkit.user.js
@@ -118,15 +118,18 @@
   // content iframe only pins to that iframe's own viewport otherwise.
   const uiMountDoc = S.findTopSameOriginDoc();
 
-  // Topics where the toolkit must not appear (Block Builder, Obesity designs).
-  // Matched on the TOP document's /topics/<id> URL, since this script runs
-  // inside the nested content iframe whose own URL has no topic id.
-  const EXCLUDED_TOPIC_IDS = ['88176', '84252'];
+  // Pages where the toolkit must not appear (Block Builder, Obesity designs).
+  // Matched on the HTML file name, checked on this frame's URL (the content
+  // iframe) and on the top document's URL.
+  const EXCLUDED_PAGE_NAMES = ['designs-260603-hfep.html', 'rcpi-bs-block-builder.html'];
   function isExcludedPage() {
-    try {
-      const m = uiMountDoc.location.pathname.match(/\/d2l\/le\/lessons\/\d+\/topics\/(\d+)/i);
-      return !!m && EXCLUDED_TOPIC_IDS.includes(m[1]);
-    } catch (e) { return false; }
+    const nameOf = w => {
+      try { return decodeURIComponent(w.location.pathname.split('/').pop() || '').toLowerCase(); }
+      catch (e) { return ''; }
+    };
+    const names = [nameOf(window)];
+    try { names.push(nameOf(uiMountDoc.defaultView)); } catch (e) {}
+    return names.some(n => EXCLUDED_PAGE_NAMES.includes(n));
   }
   function removePanel() {
     ['rcpi-audit-panel', 'rcpi-audit-minbar'].forEach(id => {
