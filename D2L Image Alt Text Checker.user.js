@@ -12,6 +12,7 @@
 // @include        https://brightspace.rcpi.ie/content/enforced/*
 // @include        https://*.brightspace.com/*
 // @include        https://*.d2l.com/*
+// @run-at       document-idle
 // @grant        none
 // ==/UserScript==
 

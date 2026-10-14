@@ -4,6 +4,7 @@
 // @version      1.1
 // @description  On NEW pages only: slugifies filename on first save with date+uid, restores visible title, then completes original action.
 // @match        https://brightspace.rcpi.ie/*
+// @run-at       document-idle
 // @grant        none
 // ==/UserScript==
 (function () {

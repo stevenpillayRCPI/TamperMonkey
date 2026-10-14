@@ -4,6 +4,7 @@
 // @description  Finds nav objects (topics) in a single course that point at the same content file (e.g. Untitled.html clobbered by an import). Compact on-page report; highlights clashes where titles differ; optional CSV download.
 // @match        https://brightspace.rcpi.ie/d2l/*
 // @version      2.4
+// @run-at       document-idle
 // @grant        none
 // ==/UserScript==
 

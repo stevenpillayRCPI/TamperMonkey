@@ -4,6 +4,7 @@
 // @description  Walks the whole course file store (Manage Files), flags suspicious filenames (Untitled*, Copy, New Document, generic defaults) and HTML pages linked by no topic. On-page report + CSV.
 // @match        https://brightspace.rcpi.ie/d2l/*
 // @version      1.0
+// @run-at       document-idle
 // @grant        none
 // ==/UserScript==
 

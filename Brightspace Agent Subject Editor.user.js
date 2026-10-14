@@ -6,6 +6,7 @@
 // @author       Your Name
 // @match        https://brightspace.rcpi.ie/d2l/le/intelligentagents/agent/*/Edit*
 // @icon         https://www.rcpi.ie/wp-content/uploads/2020/01/cropped-favicon-32x32.png
+// @run-at       document-idle
 // @grant        none
 // ==/UserScript==
 

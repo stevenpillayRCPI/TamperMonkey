@@ -4,6 +4,7 @@
 // @description  Flags content topics whose linked file has a suspicious name (Untitled*, *Copy*, index/summary/overview/introduction, etc.). Content API only — no Manage Files. On-page report + CSV.
 // @match        https://brightspace.rcpi.ie/d2l/*
 // @version      1.0
+// @run-at       document-idle
 // @grant        none
 // ==/UserScript==
 

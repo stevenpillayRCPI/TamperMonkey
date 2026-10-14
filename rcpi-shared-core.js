@@ -1,5 +1,6 @@
 /* =====================================================================
  * RCPI Toolkit — Shared Core
+ * Version: 1.0
  * ---------------------------------------------------------------------
  * Canonical detection rules + generic helpers used by BOTH the Block
  * Builder Edit Toolkit (edit mode) and the Brightspace Audit Toolkit

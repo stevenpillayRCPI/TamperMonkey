@@ -13,6 +13,7 @@
 // @grant        GM_setValue
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
+// @connect      api.crossref.org
 // @run-at       document-idle
 // ==/UserScript==
 

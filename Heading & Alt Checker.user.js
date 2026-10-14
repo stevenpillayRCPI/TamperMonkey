@@ -1,7 +1,11 @@
 // ==UserScript==
-// @name        Heading & Alt Checker
-// @match       https://brightspace.rcpi.ie/content/*
-// @grant       none
+// @name         Heading & Alt Checker
+// @namespace    rcpi-heading-alt-checker
+// @version      1.0
+// @description  Lightweight spot-check for skipped heading levels and missing/empty image alt text on a Brightspace content page; logs details to console and shows an auto-hiding on-page summary.
+// @match        https://brightspace.rcpi.ie/content/*
+// @run-at       document-idle
+// @grant        none
 // ==/UserScript==
 
 (function() {

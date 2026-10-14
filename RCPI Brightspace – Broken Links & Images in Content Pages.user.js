@@ -6,6 +6,7 @@
 // @version      1.5
 // @grant        GM_xmlhttpRequest
 // @connect      *
+// @run-at       document-idle
 // ==/UserScript==
 
 (function () {

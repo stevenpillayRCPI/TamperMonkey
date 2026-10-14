@@ -5,6 +5,7 @@
 // @description  Expands all nav items recursively and highlights duplicate object IDs
 // @author       You
 // @match        https://brightspace.rcpi.ie/*
+// @run-at       document-idle
 // @grant        none
 // ==/UserScript==
 

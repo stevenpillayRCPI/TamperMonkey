@@ -4,6 +4,7 @@
 // @version      1.1
 // @description  Shows a countdown and presses Enter on the currently focused element
 // @match        *://*/*
+// @run-at       document-idle
 // @grant        none
 // ==/UserScript==
 
