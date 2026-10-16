@@ -5,7 +5,7 @@
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      9.7
+// @version      9.8
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -3750,7 +3750,13 @@
     const didWrite = tinyWrite(() => {
       const token = Date.now().toString(36).slice(-4) + Math.floor(Math.random() * 99);
       const row = compEl.closest('.row.wysiwyg-mode');
-      const source = row || compEl;
+      // Nested inside another component (card, accordion, tab pane...): copy just
+      // this component. Otherwise copy the whole row it sits in.
+      const outer = compEl.parentElement && compEl.parentElement.closest(
+        '.card, .accordion, .horizontal-tabs, .vertical-tabs-wrapper, .flip-cards, .text-carousel, ' +
+        '.image-carousel, .reveal-table, .timeline, .reveal-container, .tab-content');
+      const nested = !!(outer && row && row.contains(outer));
+      const source = nested ? compEl : (row || compEl);
       const clone = source.cloneNode(true);
       reidSubtree(clone, token);
       // After re-id, point each accordion's "Open All" button at its accordion id.
