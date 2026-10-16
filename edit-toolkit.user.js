@@ -5,7 +5,7 @@
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      9.2
+// @version      9.4
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -2075,6 +2075,7 @@
       <div id="bb-tk-header">
         <span id="bb-tk-title">🧱 Edit Toolkit</span>
         <span id="bb-tk-badges"></span>
+        <button id="bb-tk-settings" title="Toolkit settings">⚙</button>
         <button id="bb-tk-min" title="Minimise to a bar">⟨</button>
       </div>
       <div id="bb-tk-body">
@@ -2236,6 +2237,7 @@
 
     // Minimise to / restore from the thin left bar.
     panel.querySelector('#bb-tk-min').addEventListener('click', () => setMinimized(true));
+    panel.querySelector('#bb-tk-settings').addEventListener('click', openSettingsModal);
 
     // Edge-drag to resize the docked pane width (persisted).
     const resizeHandle = panel.querySelector('#bb-tk-resize');
@@ -3211,6 +3213,122 @@
   // Shared across card/component/image/iframe menus. `el` is always the
   // component's own element (never the row), so these work correctly on
   // components nested inside other components (e.g. a card inside a card).
+  // ─── CONTENT SLOTS (insert INTO a component) ───────────────────────────────
+  // A "slot" is the editable region that holds a component item's content:
+  // card body, accordion body, tab pane, flip-card front/back, carousel slide,
+  // click-and-reveal body, table cell. contentSlotFor() finds the slot for the
+  // item under the click; insertComponentIntoSlot() drops a library component
+  // into it (after the clicked block if there is one, else at the end).
+  const CONTENT_SLOT_SEL = '.card-body [contenteditable="true"], .accordion-body [contenteditable="true"], ' +
+    '.tab-pane [contenteditable="true"], .flip-card-front-content [contenteditable="true"], ' +
+    '.flip-card-back-body [contenteditable="true"], .text-carousel-content [contenteditable="true"], ' +
+    '.carousel-caption [contenteditable="true"], .reveal-item .collapse [contenteditable="true"]';
+
+  function firstEditable(root) {
+    return root ? root.querySelector('[contenteditable="true"]:not(.deletion-guard)') : null;
+  }
+
+  // Child of `kids` whose vertical extent is closest to clientY.
+  function nearestChildByY(kids, y) {
+    let best = null, bestD = Infinity;
+    kids.forEach(k => {
+      const r = k.getBoundingClientRect();
+      const d = y < r.top ? r.top - y : (y > r.bottom ? y - r.bottom : 0);
+      if (d < bestD) { bestD = d; best = k; }
+    });
+    return best;
+  }
+
+  // The editable region a click belongs to. Clicks on blank space inside a
+  // typing area resolve to that area; clicks on component chrome (card padding,
+  // card-body, accordion item edge...) resolve to the nearest content slot
+  // inside the clicked component instead of climbing out of it.
+  function slotAtPoint(el) {
+    const root = tinyDoc && tinyDoc.body;
+    if (el.isContentEditable) {
+      const r = el.closest('[contenteditable="true"]');
+      if (r && r !== root && !r.matches('.deletion-guard') && !r.closest('button, .accordion-header, .nav-link, .reveal-button')) return r;
+    }
+    for (let a = el; a && a !== root; a = a.parentElement) {
+      if (a.matches && a.matches('.row.wysiwyg-mode')) break;
+      const s = a.querySelector(CONTENT_SLOT_SEL);
+      if (s) return s;
+    }
+    return null;
+  }
+
+  // Slot info for the item under the click: { slot, afterEl, label } or null.
+  function contentSlotFor(compEl, tgt, type) {
+    const el = tgt && tgt.nodeType === 3 ? tgt.parentElement : tgt;
+    if (!el || !el.closest) return null;
+    const doc = compEl.ownerDocument;
+    let slot = null, label = 'this item';
+    if (compEl.matches('.accordion')) {
+      const item = el.closest('.accordion-item');
+      slot = item ? firstEditable(item.querySelector('.accordion-body')) : null;
+      label = 'this accordion item';
+    } else if (compEl.matches('.horizontal-tabs, .vertical-tabs-wrapper')) {
+      let pane = el.closest('.tab-pane');
+      if (!pane) {
+        const li = el.closest('.nav-item');
+        const link = li && li.querySelector('.nav-link');
+        const id = link ? (link.getAttribute('data-bs-target') || '').replace(/^#/, '') : '';
+        pane = id ? doc.getElementById(id) : null;
+      }
+      if (!pane) {
+        const content = compEl.matches('.vertical-tabs-wrapper') ? compEl : compEl.nextElementSibling;
+        pane = content ? content.querySelector('.tab-pane.active') : null;
+      }
+      slot = pane ? (pane.querySelector(':scope > [contenteditable="true"]') || firstEditable(pane)) : null;
+      label = 'this tab';
+    } else if (compEl.matches('.flip-cards')) {
+      const item = el.closest('.flip-card-container');
+      if (item) {
+        const back = !!el.closest('.flip-card-back');
+        slot = back ? firstEditable(item.querySelector('.flip-card-back-body')) : firstEditable(item.querySelector('.flip-card-front-content'));
+        label = back ? 'this flip card (back)' : 'this flip card (front)';
+      }
+    } else if (compEl.matches('.text-carousel, .image-carousel')) {
+      const item = el.closest('.carousel-item') || compEl.querySelector('.carousel-item.active');
+      if (item) slot = firstEditable(item.querySelector(compEl.matches('.text-carousel') ? '.text-carousel-content' : '.carousel-caption'));
+      label = 'this slide';
+    } else if (compEl.matches('.reveal-container')) {
+      slot = firstEditable(compEl.querySelector('.reveal-item .collapse'));
+      label = 'this reveal';
+    }
+    if (!slot) return null;
+    return { slot, afterEl: directChildOf(slot, tgt), label };
+  }
+
+  function insertComponentIntoSlot(entry, info) {
+    const html = entry.build();
+    const didWrite = tinyWrite(() => {
+      const component = extractShellComponent(html);
+      if (info.afterEl && info.afterEl.parentNode === info.slot) info.slot.insertBefore(component, info.afterEl.nextSibling);
+      else info.slot.appendChild(component);
+    }, 'insertComponentIntoSlot ' + entry.label, { ungated: true });
+    if (didWrite) { toast(`✓ ${entry.label} inserted inside ${info.label}`, 'success'); scheduleAudit(); refreshComponentList(); }
+    else toast('Editor API unavailable', 'warn');
+  }
+
+  // "▸ Insert component inside …" menu item. slotFn returns slot info or null
+  // (null shows the item disabled, with a hint).
+  function appendInsertInsideButton(menu, slotFn, x, y) {
+    let info = null;
+    try { info = slotFn(); } catch (err) { dbg('slot lookup failed', err); }
+    const btn = document.createElement('button');
+    if (info) {
+      btn.textContent = `▸ Insert component inside ${info.label}…`;
+      btn.title = info.afterEl ? 'Adds a library component after the block you clicked, inside this item' : "Adds a library component at the end of this item's content";
+      btn.addEventListener('click', (e) => { e.stopPropagation(); openInsertComponentMenu(x, y, null, null, false, null, info); });
+    } else {
+      btn.textContent = '▸ Insert component inside…';
+      btn.disabled = true;
+      btn.title = 'Right-click inside an item (not on the component edge) to insert into it';
+    }
+    menu.appendChild(btn);
+  }
+
   // The block under the click, for "insert next to the clicked block". Takes the
   // innermost paragraph / heading / list / table / figure etc. containing the
   // click (list items resolve to their list), then climbs until the block's
@@ -3220,7 +3338,20 @@
   function blockAtPoint(tgt) {
     const el = tgt && tgt.nodeType === 3 ? tgt.parentElement : tgt;
     if (!el || !el.closest) return null;
-    let blk = el.closest('p, h1, h2, h3, h4, h5, h6, li, blockquote, pre, figure, table, ul, ol, textarea, hr') || el;
+    let blk = el.closest('p, h1, h2, h3, h4, h5, h6, li, blockquote, pre, figure, table, ul, ol, textarea, hr');
+    if (!blk) {
+      // No block under the click: blank space in a typing area, or component
+      // chrome (card padding etc). Anchor to the nearest child of the content
+      // slot instead of climbing out and landing after the whole component.
+      const bareEditable = el.isContentEditable && !el.matches('[contenteditable="true"]');
+      const slot = bareEditable ? null : slotAtPoint(el);
+      if (slot) {
+        const kids = Array.from(slot.children).filter(c => !c.classList.contains('deletion-guard'));
+        const pick = (el !== slot && directChildOf(slot, el)) || (kids.length ? nearestChildByY(kids, _ctxY) : null);
+        if (pick) { dbg('blockAtPoint: blank-space click resolved inside slot ->', pick.tagName); return pick; }
+      }
+      blk = el;
+    }
     if (blk.tagName === 'LI') blk = blk.closest('ul, ol') || blk;
     const root = tinyDoc && tinyDoc.body;
     while (blk && blk !== root && !(blk.parentElement && blk.parentElement.isContentEditable)) blk = blk.parentElement;
@@ -3267,7 +3398,7 @@
     else toast('Copied, but could not remove — editor API unavailable', 'warn');
   }
 
-  function appendComponentUtilityItems(menu, el, x, y) {
+  function appendComponentUtilityItems(menu, el, x, y, slotFn) {
     const add = (label, fn, title) => {
       const btn = document.createElement('button');
       btn.textContent = label;
@@ -3306,6 +3437,7 @@
     sep2.className = 'bb-ctx-sub';
     sep2.textContent = 'Insert another component';
     menu.appendChild(sep2);
+    if (slotFn) appendInsertInsideButton(menu, slotFn, x, y);
     const btnAfter = document.createElement('button');
     btnAfter.textContent = '▸ Insert component after this…';
     btnAfter.title = 'Adds a new component from the library directly after this one, in the same parent';
@@ -3418,7 +3550,7 @@
       });
     }
 
-    appendComponentUtilityItems(menu, compEl, x, y);
+    appendComponentUtilityItems(menu, compEl, x, y, () => contentSlotFor(compEl, tgt, type));
     positionMenu(menu, x, y);
   }
 
@@ -3934,6 +4066,11 @@
       });
       menu.appendChild(btn);
     });
+
+    appendInsertInsideButton(menu, () => {
+      const slot = cellEl.isContentEditable ? cellEl : firstEditable(cellEl);
+      return slot ? { slot, afterEl: _ctxTgt ? directChildOf(slot, _ctxTgt) : null, label: 'this cell' } : null;
+    }, x, y);
 
     positionMenu(menu, x, y);
   }
@@ -4535,7 +4672,8 @@
       const hit = routeFor(n);
       if (hit) {
         claim(hit[0]);
-        hit[1]();
+        _pendingCtx = { n, tgt, x, y };
+        try { hit[1](); } finally { _pendingCtx = null; }
         return;
       }
     }
@@ -4619,7 +4757,7 @@
     const menu = document.createElement('div');
     menu.id = 'bb-row-menu';
     menu.className = 'bb-ctx-menu';
-    menu.innerHTML = `<div class="bb-ctx-title">Row colour</div>`;
+    menu.innerHTML = `<div class="bb-ctx-title">Row</div><div class="bb-ctx-sub">Row colour</div>`;
 
     ROW_COLOURS.forEach(c => {
       const btn = document.createElement('button');
@@ -5145,14 +5283,14 @@ function addParagraphToRow(rowEl) {
   // Component library menu: grouped by category. Reuses the same anchor/position
   // targeting as openInsertRowMenu so the component lands in the same spot the
   // row-colour menu would have inserted an empty row.
-  function openInsertComponentMenu(x, y, anchorRow, position, absolute, siblingTarget) {
+  function openInsertComponentMenu(x, y, anchorRow, position, absolute, siblingTarget, slotTarget) {
     closeAnyMenu();
     dbg('openInsertComponentMenu. anchorRow=', !!anchorRow, 'position=', position, 'siblingTarget=', !!siblingTarget);
 
     const menu = document.createElement('div');
     menu.id = 'bb-insertcomponent-menu';
     menu.className = 'bb-ctx-menu';
-    menu.innerHTML = `<div class="bb-ctx-title">${siblingTarget ? 'Insert component after this' : 'Insert component'}</div>`;
+    menu.innerHTML = `<div class="bb-ctx-title">${slotTarget ? 'Insert component inside ' + escapeHtml(slotTarget.label) : siblingTarget ? 'Insert component after this' : 'Insert component'}</div>`;
 
     let lastCategory = null;
     INSERT_LIBRARY.forEach(entry => {
@@ -5166,7 +5304,8 @@ function addParagraphToRow(rowEl) {
       const btn = document.createElement('button');
       btn.textContent = entry.label;
       btn.addEventListener('click', () => {
-        if (siblingTarget) insertComponentAfterElement(entry, siblingTarget);
+        if (slotTarget) insertComponentIntoSlot(entry, slotTarget);
+        else if (siblingTarget) insertComponentAfterElement(entry, siblingTarget);
         else insertComponent(entry, anchorRow, position);
         closeAnyMenu();
       });
@@ -5739,9 +5878,213 @@ function addParagraphToRow(rowEl) {
     }
   }
 
+  // ─── MERGED CONTEXT MENU + MENU STYLE ──────────────────────────────────────
+  // Every Alt+right-click menu is built by its own opener (row, card, component,
+  // reveal, image, link, table...). positionMenu() is the one place they all pass
+  // through, so the merging and the fly-out layout happen there:
+  //  • PARENT LEVELS: the menu for what you clicked gets the menus of every
+  //    structural parent (card, component, click-and-reveal, row) appended as
+  //    "In: Row" etc. So a row colour can be changed from inside any component.
+  //    Parent menus are built by calling the real openers in capture mode, so
+  //    they can never drift from the standalone versions.
+  //  • STYLE (Settings, gear in the panel header): "flyout" (default) turns each
+  //    sub-heading group into a pop-out entry; "flat" keeps one list with
+  //    collapsible parent sections.
+  const MENU_STYLE_KEY = 'bb-menu-style';
+  function getMenuStyle() {
+    try { return GM_getValue(MENU_STYLE_KEY, 'flyout') === 'flat' ? 'flat' : 'flyout'; } catch { return 'flyout'; }
+  }
+
+  let _pendingCtx = null;   // set by onContextMenu for the first menu of a right-click
+  let _capture = null;      // when set, positionMenu hands the built menu back instead of showing it
+
+  const CTX_COMP_SEL = '.accordion, .horizontal-tabs, .vertical-tabs-wrapper, .flip-cards, ' +
+                       '.text-carousel, .image-carousel, .reveal-table';
+
+  // Structural level for an element, or null. Mirrors the routing in onContextMenu.
+  function parentLevelOf(a) {
+    if (!a || a.nodeType !== 1 || !a.matches) return null;
+    const compLabel = (el) => { try { return componentItemInfo(el).type || 'Component'; } catch { return 'Component'; } };
+    if (a.matches('.card')) return { el: a, label: 'Card', open: (x, y, tgt) => openCardMenu(a, x, y, tgt) };
+    if (a.matches(CTX_COMP_SEL)) return { el: a, label: compLabel(a), open: (x, y, tgt) => openComponentMenu(a, tgt, x, y) };
+    if (a.matches('.tab-content')) {
+      const owner = a.closest('.vertical-tabs-wrapper') || (a.parentElement && a.parentElement.querySelector('.horizontal-tabs'));
+      if (owner) return { el: owner, label: compLabel(owner), open: (x, y, tgt) => openComponentMenu(owner, tgt, x, y) };
+    }
+    if (a.matches('.reveal-container')) return { el: a, label: 'Click and Reveal', open: (x, y, tgt) => openRevealMenu(a, tgt, x, y) };
+    if (a.matches('.row.wysiwyg-mode') && !(a.parentElement && a.parentElement.matches('.reveal-container'))) {
+      return { el: a, label: 'Row', open: (x, y, tgt) => openRowMenu(a, x, y, tgt) };
+    }
+    return null;
+  }
+
+  function captureLevelMenu(lv, x, y, tgt) {
+    const prev = _capture;
+    _capture = { menu: null };
+    try { lv.open(x, y, tgt); } catch (err) { dbg('level capture failed', lv.label, err); }
+    const m = _capture.menu;
+    _capture = prev;
+    return m;
+  }
+
+  function appendParentLevels(menu, ctx, x, y) {
+    const stop = tinyDoc && tinyDoc.body;
+    const seen = new Set();
+    const self = parentLevelOf(ctx.n);
+    if (self) seen.add(self.el);
+    const levels = [];
+    for (let a = ctx.n.parentElement; a && a !== stop; a = a.parentElement) {
+      const lv = parentLevelOf(a);
+      if (lv && !seen.has(lv.el)) { seen.add(lv.el); levels.push(lv); }
+    }
+    levels.forEach(lv => {
+      const cap = captureLevelMenu(lv, x, y, ctx.tgt);
+      if (!cap) return;
+      const nodes = Array.from(cap.children).filter(c => !c.classList.contains('bb-ctx-title') && !c.classList.contains('bb-ctx-close'));
+      if (!nodes.length) return;
+      const wrap = document.createElement('div');
+      wrap.className = 'bb-ctx-level';
+      wrap.dataset.title = lv.label;
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'bb-level-toggle';
+      toggle.textContent = '▸ In: ' + lv.label;
+      const body = document.createElement('div');
+      body.className = 'bb-ctx-level-body';
+      body.style.display = 'none';
+      nodes.forEach(n => body.appendChild(n));
+      toggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const open = body.style.display === 'none';
+        body.style.display = open ? '' : 'none';
+        toggle.textContent = (open ? '▾ In: ' : '▸ In: ') + lv.label;
+      });
+      wrap.appendChild(toggle);
+      wrap.appendChild(body);
+      menu.appendChild(wrap);
+    });
+  }
+
+  function hideFly(w) {
+    w.classList.remove('pinned');
+    const p = w.querySelector(':scope > .bb-fly-panel');
+    if (p) p.style.display = 'none';
+  }
+
+  function makeFlyEntry(title, nodes) {
+    const wrap = document.createElement('div');
+    wrap.className = 'bb-fly';
+    const head = document.createElement('button');
+    head.type = 'button';
+    head.className = 'bb-fly-head';
+    const label = document.createElement('span');
+    label.textContent = title;
+    const arrow = document.createElement('span');
+    arrow.className = 'bb-fly-arrow';
+    arrow.textContent = '▸';
+    head.appendChild(label);
+    head.appendChild(arrow);
+    const panel = document.createElement('div');
+    panel.className = 'bb-fly-panel';
+    nodes.forEach(n => panel.appendChild(n));
+    wrap.appendChild(head);
+    wrap.appendChild(panel);
+
+    const show = () => {
+      clearTimeout(wrap._t);
+      if (wrap.parentElement) {
+        Array.from(wrap.parentElement.children).forEach(s => { if (s !== wrap && s.classList.contains('bb-fly')) hideFly(s); });
+      }
+      panel.style.display = 'block';
+      const r = head.getBoundingClientRect();
+      panel.style.left = (r.right - 2) + 'px';
+      panel.style.top = r.top + 'px';
+      const pr = panel.getBoundingClientRect();
+      const vw = window.innerWidth, vh = window.innerHeight;
+      if (pr.right > vw - 8) panel.style.left = Math.max(8, r.left - pr.width + 2) + 'px';
+      if (pr.bottom > vh - 8) panel.style.top = Math.max(8, vh - 8 - pr.height) + 'px';
+    };
+    wrap.addEventListener('mouseenter', show);
+    wrap.addEventListener('mouseleave', () => {
+      wrap._t = setTimeout(() => {
+        if (wrap.classList.contains('pinned')) return;
+        if (panel.contains(document.activeElement)) return;   // e.g. a colour picker is open
+        hideFly(wrap);
+      }, 220);
+    });
+    head.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (wrap.classList.contains('pinned')) hideFly(wrap);
+      else { show(); wrap.classList.add('pinned'); }
+    });
+    return wrap;
+  }
+
+  // Turn a flat node list (items + .bb-ctx-sub headers + parent levels) into
+  // pop-out entries. Groups with a single item stay inline.
+  function buildFlyNodes(nodes) {
+    const out = [];
+    let group = null;
+    const flush = () => {
+      if (!group) return;
+      if (group.nodes.length <= 1) out.push(...group.nodes);
+      else out.push(makeFlyEntry(group.title, buildFlyNodes(group.nodes)));
+      group = null;
+    };
+    nodes.forEach(n => {
+      if (n.classList && n.classList.contains('bb-ctx-sub')) {
+        flush();
+        group = { title: n.textContent.trim(), nodes: [] };
+        if (n.parentNode) n.parentNode.removeChild(n);
+      } else if (n.classList && n.classList.contains('bb-ctx-level')) {
+        flush();
+        const body = n.querySelector(':scope > .bb-ctx-level-body');
+        const items = body ? Array.from(body.children) : [];
+        out.push(makeFlyEntry('In: ' + (n.dataset.title || 'Parent'), buildFlyNodes(items)));
+        if (n.parentNode) n.parentNode.removeChild(n);
+      } else if (group) group.nodes.push(n);
+      else out.push(n);
+    });
+    flush();
+    return out;
+  }
+
+  function decorateMenu(menu, ctx, x, y) {
+    try {
+      if (ctx && ctx.n && tinyDoc) appendParentLevels(menu, ctx, x, y);
+      if (getMenuStyle() === 'flyout') {
+        const kids = Array.from(menu.children).filter(c => !c.classList.contains('bb-ctx-title') && !c.classList.contains('bb-ctx-close'));
+        buildFlyNodes(kids).forEach(n => menu.appendChild(n));
+      }
+    } catch (err) { dbg('decorateMenu failed (menu left as built)', err); }
+  }
+
+  function openSettingsModal() {
+    const cur = getMenuStyle();
+    showModal('Toolkit settings', `
+      <div class="bb-rule-form">
+        <div style="font-weight:700;">Right-click menu style</div>
+        <label class="bb-rule-inline"><input type="radio" name="bb-menu-style" value="flyout"${cur === 'flyout' ? ' checked' : ''}> Pop-out: each group opens beside the menu (default)</label>
+        <label class="bb-rule-inline"><input type="radio" name="bb-menu-style" value="flat"${cur === 'flat' ? ' checked' : ''}> Flat list: everything in one column, parent sections collapsed</label>
+        <div class="bb-hint">Applies from the next Alt+right-click. Saved in Tampermonkey storage for this browser profile.</div>
+      </div>
+      <div class="bb-fix-actions"><button id="bb-set-close" class="bb-btn bb-btn-goto">Close</button></div>`);
+    const modal = document.getElementById('bb-modal');
+    if (!modal) return;
+    modal.querySelectorAll('input[name="bb-menu-style"]').forEach(r => r.addEventListener('change', () => {
+      try { GM_setValue(MENU_STYLE_KEY, r.value); } catch (err) { dbg('settings save failed', err); }
+      toast(`✓ Menu style: ${r.value === 'flat' ? 'flat list' : 'pop-out'}`, 'success');
+    }));
+    modal.querySelector('#bb-set-close').addEventListener('click', () => modal.remove());
+  }
+
   // ─── SHARED MENU HELPERS ────────────────────────────────────────────────────
   function positionMenu(menu, x, y, absolute) {
+    // Capture mode: a parent level's menu is being built for merging, not shown.
+    if (_capture) { _capture.menu = menu; return; }
+    const ctx = _pendingCtx; _pendingCtx = null;
     appendBrItems(menu);
+    decorateMenu(menu, ctx, x, y);
     // Small × button, top-right, as a backup way to dismiss the menu — the
     // outside-click listener sometimes fails to fire (e.g. on focus loss).
     if (!menu.querySelector('.bb-ctx-close')) {
@@ -5846,13 +6189,7 @@ function addParagraphToRow(rowEl) {
     conv.textContent = '→ Convert to single accordion';
     conv.addEventListener('click', () => { revealToAccordion(revealEl); closeAnyMenu(); });
     menu.appendChild(conv);
-    const rowEl = revealEl.closest('.row.wysiwyg-mode');
-    if (rowEl) {
-      const rowBtn = document.createElement('button');
-      rowBtn.textContent = '▸ Row options…';
-      rowBtn.addEventListener('click', (e) => { e.stopPropagation(); openRowMenu(rowEl, x, y, tgt); });
-      menu.appendChild(rowBtn);
-    }
+    appendInsertInsideButton(menu, () => contentSlotFor(revealEl, tgt, 'Click and Reveal'), x, y);
     positionMenu(menu, x, y);
   }
 
@@ -6012,25 +6349,10 @@ function addParagraphToRow(rowEl) {
     } else {
       add('Add animated icon in header…', () => cardAddAnimatedIconHeader(cardEl));
     }
-    appendComponentUtilityItems(menu, cardEl, x, y);
-
-    // Insert a library component right after the clicked block, within this
-    // card's own content area — same "at cursor" behaviour as the row menu's
-    // equivalent option, but scoped to the card so it doesn't escape it.
-    const editableForInsert = cardEl.querySelector('.card-body [contenteditable="true"]');
-    const clickedBlock = (tgt && editableForInsert) ? directChildOf(editableForInsert, tgt) : null;
-    if (clickedBlock) {
-      const insertHereBtn = document.createElement('button');
-      insertHereBtn.textContent = '▸ Insert component at clicked block…';
-      insertHereBtn.title = 'Adds a library component right after the block you clicked, within this card';
-      insertHereBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const cur = document.getElementById('bb-card-menu');
-        if (cur) cur.remove();
-        openInsertComponentMenu(x, y, null, null, false, clickedBlock);
-      });
-      menu.appendChild(insertHereBtn);
-    }
+    appendComponentUtilityItems(menu, cardEl, x, y, () => {
+      const slot = firstEditable(cardEl.querySelector('.card-body'));
+      return slot ? { slot, afterEl: tgt ? directChildOf(slot, tgt) : null, label: 'this card' } : null;
+    });
 
     positionMenu(menu, x, y);
   }
@@ -6804,6 +7126,11 @@ function addParagraphToRow(rowEl) {
         font-size: 18px; cursor: pointer; padding: 0 4px; line-height: 1;
       }
       #bb-tk-min:hover { opacity: .8; }
+      #bb-tk-settings {
+        background: none; border: none; color: #fff;
+        font-size: 15px; cursor: pointer; padding: 0 4px; line-height: 1;
+      }
+      #bb-tk-settings:hover { opacity: .8; }
       #bb-tk-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
       #bb-tk-tabs {
         display: flex; border-bottom: 1px solid #dee2e6;
@@ -6913,6 +7240,20 @@ function addParagraphToRow(rowEl) {
       .bb-swatch-lightblue { background: #9ec5fe; }
       .bb-swatch-red       { background: #dc3545; }
       .bb-swatch-yellow    { background: #ffc107; }
+
+      /* Pop-out groups and merged parent levels */
+      .bb-ctx-menu .bb-fly-head { justify-content: space-between; }
+      .bb-ctx-menu .bb-fly-arrow { opacity: .55; margin-left: 14px; }
+      .bb-ctx-menu .bb-fly-head:hover .bb-fly-arrow { opacity: 1; }
+      .bb-ctx-menu .bb-fly-panel {
+        display: none; position: fixed; z-index: 2000002;
+        min-width: 220px; max-width: 340px; max-height: calc(100vh - 16px); overflow-y: auto;
+        background: #fff; border: 1px solid #cdd5dc; border-radius: 6px;
+        box-shadow: 0 4px 16px rgba(0,0,0,.22); padding: 4px;
+      }
+      .bb-ctx-menu .bb-level-toggle { font-weight: 700; color: #002d72; border-top: 1px solid #e3e8ec; border-radius: 0; margin-top: 4px; }
+      .bb-ctx-menu .bb-level-toggle:hover { color: #fff; }
+      .bb-ctx-menu .bb-ctx-level-body { padding-left: 8px; border-left: 2px solid #d9e2ec; margin-left: 6px; }
 
       /* Table menu specifics */
       .bb-table-menu { min-width: 248px; }
