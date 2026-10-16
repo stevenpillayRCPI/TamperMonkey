@@ -5,7 +5,7 @@
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      9.4
+// @version      9.5
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -3398,62 +3398,87 @@
     else toast('Copied, but could not remove — editor API unavailable', 'warn');
   }
 
-  function appendComponentUtilityItems(menu, el, x, y, slotFn) {
-    const add = (label, fn, title) => {
-      const btn = document.createElement('button');
-      btn.textContent = label;
-      if (title) btn.title = title;
-      btn.addEventListener('click', () => { fn(); closeAnyMenu(); });
-      menu.appendChild(btn);
-    };
+  // ── Shared item groups, in the order people use them ──────────────────────
+  // quick actions first, then Insert, then (menu-specific groups), then Copy;
+  // destructive buttons carry .bb-danger and are moved to the red group
+  // at the bottom by decorateMenu.
+  function utilBtn(menu, label, fn, title) {
+    const btn = document.createElement('button');
+    btn.textContent = label;
+    if (title) btn.title = title;
+    btn.addEventListener('click', () => { fn(); closeAnyMenu(); });
+    menu.appendChild(btn);
+    return btn;
+  }
+  // For buttons that open another menu: that opener closes the old one itself.
+  function utilOpen(menu, label, fn, title) {
+    const btn = document.createElement('button');
+    btn.textContent = label;
+    if (title) btn.title = title;
+    btn.addEventListener('click', (e) => { e.stopPropagation(); fn(); });
+    menu.appendChild(btn);
+    return btn;
+  }
+  function utilHead(menu, text, cls) {
+    const d = document.createElement('div');
+    d.className = cls || 'bb-ctx-head';
+    d.textContent = text;
+    menu.appendChild(d);
+  }
 
-    // Click-based inserts: next to the block you actually right-clicked, in the
-    // nearest editable area, however deeply the component is nested.
+  function appendQuickItems(menu, el, x, y, slotFn) {
     const clickedBlock = blockAtPoint(_ctxTgt);
     if (clickedBlock) {
       const tag = clickedBlock.tagName.toLowerCase();
-      const subB = document.createElement('div');
-      subB.className = 'bb-ctx-sub';
-      subB.textContent = `Next to clicked block <${tag}>`;
-      menu.appendChild(subB);
-      const hint = `Relative to the <${tag}> under the pointer, inside its own editable area`;
-      add('¶ Add paragraph after', () => addParagraphAfterElement(clickedBlock, 'after'), hint);
-      add('¶ Add paragraph before', () => addParagraphAfterElement(clickedBlock, 'before'), hint);
-      add('⤒ Insert <br> above', () => insertBrAdjacent(clickedBlock, 'before'), hint);
-      add('⤓ Insert <br> below', () => insertBrAdjacent(clickedBlock, 'after'), hint);
+      const btn = utilBtn(menu, 'Add paragraph after', () => addParagraphAfterElement(clickedBlock, 'after'),
+        `Adds an empty paragraph after the <${tag}> under the pointer, inside its own editable area`);
+      const hint = document.createElement('span');
+      hint.className = 'bb-hint-r';
+      hint.textContent = 'this ' + (tag === 'p' ? 'paragraph' : tag);
+      btn.appendChild(hint);
     }
-
-    const sep = document.createElement('div');
-    sep.className = 'bb-ctx-sub';
-    sep.textContent = 'Position / clipboard (whole component)';
-    menu.appendChild(sep);
-    add('¶ Add paragraph after component', () => addParagraphAfterElement(el), 'Inserts an empty paragraph directly after this whole component, even when nested');
-    add('⤒ Insert <br> above component', () => insertBrAdjacent(el, 'before'));
-    add('⤓ Insert <br> below component', () => insertBrAdjacent(el, 'after'));
-    add('⧉ Copy component (clean)', () => copyElementClean(el), 'Copies just this component — no row wrapper or guard divs');
-    add('✂ Cut component (clean)', () => cutElementClean(el));
-
-    const sep2 = document.createElement('div');
-    sep2.className = 'bb-ctx-sub';
-    sep2.textContent = 'Insert another component';
-    menu.appendChild(sep2);
     if (slotFn) appendInsertInsideButton(menu, slotFn, x, y);
-    const btnAfter = document.createElement('button');
-    btnAfter.textContent = '▸ Insert component after this…';
-    btnAfter.title = 'Adds a new component from the library directly after this one, in the same parent';
-    btnAfter.addEventListener('click', (e) => {
-      e.stopPropagation();
-      openInsertComponentMenu(x, y, null, null, false, el);
-    });
-    menu.appendChild(btnAfter);
-    const btnWrap = document.createElement('button');
-    btnWrap.textContent = '▤ Wrap in…';
-    btnWrap.title = 'Moves this component into the content area of a chosen library shell (card, accordion, etc.)';
-    btnWrap.addEventListener('click', (e) => {
-      e.stopPropagation();
-      openWrapInMenu(el, x, y);
-    });
-    menu.appendChild(btnWrap);
+  }
+
+  function appendInsertGroup(menu, el, x, y, slotFn) {
+    const noun = nounFor(el);
+    utilHead(menu, 'Insert', 'bb-ctx-sub');
+    if (slotFn) {
+      utilHead(menu, `In this ${noun}`);
+      appendInsertInsideButton(menu, slotFn, x, y);
+    }
+    utilHead(menu, `Around this ${noun}`);
+    utilOpen(menu, `Insert component after ${noun}`, () => openInsertComponentMenu(x, y, null, null, false, el),
+      'Adds a new component from the library directly after this one, in the same parent');
+    utilBtn(menu, `Add paragraph after ${noun}`, () => addParagraphAfterElement(el), 'Inserts an empty paragraph directly after this whole component, even when nested');
+    utilBtn(menu, `Add line break above ${noun}`, () => insertBrAdjacent(el, 'before'));
+    utilBtn(menu, `Add line break below ${noun}`, () => insertBrAdjacent(el, 'after'));
+    utilOpen(menu, `Wrap ${noun} in…`, () => openWrapInMenu(el, x, y),
+      'Moves this component into the content area of a chosen library shell (card, accordion, etc.)');
+    const clickedBlock = blockAtPoint(_ctxTgt);
+    if (clickedBlock) {
+      const tag = clickedBlock.tagName.toLowerCase();
+      const hint = `Relative to the <${tag}> under the pointer, inside its own editable area`;
+      utilHead(menu, `Next to this ${tag === 'p' ? 'paragraph' : tag}`);
+      utilBtn(menu, 'Add paragraph before', () => addParagraphAfterElement(clickedBlock, 'before'), hint);
+      utilBtn(menu, 'Add paragraph after', () => addParagraphAfterElement(clickedBlock, 'after'), hint);
+      utilBtn(menu, 'Add line break above', () => insertBrAdjacent(clickedBlock, 'before'), hint);
+      utilBtn(menu, 'Add line break below', () => insertBrAdjacent(clickedBlock, 'after'), hint);
+    }
+  }
+
+  function appendCopyGroup(menu, el) {
+    const noun = nounFor(el);
+    utilBtn(menu, `Copy ${noun}`, () => copyElementClean(el), 'Copies just this component, no row wrapper or guard divs');
+    utilBtn(menu, `Cut ${noun}`, () => cutElementClean(el)).classList.add('bb-danger');
+  }
+
+  // Standard set for menus that do not need their own groups in between
+  // (image, iframe...): quick actions, Insert, Copy.
+  function appendComponentUtilityItems(menu, el, x, y, slotFn) {
+    appendQuickItems(menu, el, x, y, slotFn);
+    appendInsertGroup(menu, el, x, y, slotFn);
+    appendCopyGroup(menu, el);
   }
 
   function openComponentMenu(compEl, tgt, x, y) {
@@ -3466,6 +3491,7 @@
     menu.id = 'bb-component-menu';
     menu.className = 'bb-ctx-menu';
     menu.innerHTML = `<div class="bb-ctx-title">${type || 'Component'}</div>`;
+    appendQuickItems(menu, compEl, x, y, () => contentSlotFor(compEl, tgt, type));
 
     const add = (label, fn, danger) => {
       const btn = document.createElement('button');
@@ -3550,7 +3576,8 @@
       });
     }
 
-    appendComponentUtilityItems(menu, compEl, x, y, () => contentSlotFor(compEl, tgt, type));
+    appendInsertGroup(menu, compEl, x, y, () => contentSlotFor(compEl, tgt, type));
+    appendCopyGroup(menu, compEl);
     positionMenu(menu, x, y);
   }
 
@@ -4672,7 +4699,7 @@
       const hit = routeFor(n);
       if (hit) {
         claim(hit[0]);
-        _pendingCtx = { n, tgt, x, y };
+        _pendingCtx = { n, tgt, x, y, label: hit[0] };
         try { hit[1](); } finally { _pendingCtx = null; }
         return;
       }
@@ -4757,15 +4784,10 @@
     const menu = document.createElement('div');
     menu.id = 'bb-row-menu';
     menu.className = 'bb-ctx-menu';
-    menu.innerHTML = `<div class="bb-ctx-title">Row</div><div class="bb-ctx-sub">Row colour</div>`;
-
-    ROW_COLOURS.forEach(c => {
-      const btn = document.createElement('button');
-      const active = (c.cls === current) ? ' ✓' : '';
-      btn.innerHTML = `<span class="bb-swatch bb-swatch-${c.cls || 'none'}"></span>${c.label}${active}`;
-      btn.addEventListener('click', () => { applyRowColour(rowEl, c.cls); closeAnyMenu(); });
-      menu.appendChild(btn);
-    });
+    menu.innerHTML = `<div class="bb-ctx-title">Row</div><div class="bb-ctx-head">Row colour</div>`;
+    menu.appendChild(buildChipRow(
+      ROW_COLOURS.map(c => ({ value: c.cls, label: c.label.replace(' (plain)', ''), bg: c.cls || 'none' })),
+      current, v => applyRowColour(rowEl, v), 'sq'));
 
     // Insert-row-here entries (caret is in/near this row)
     const sep = document.createElement('div');
@@ -5878,18 +5900,19 @@ function addParagraphToRow(rowEl) {
     }
   }
 
-  // ─── MERGED CONTEXT MENU + MENU STYLE ──────────────────────────────────────
+  // ─── MERGED CONTEXT MENU + MENU STYLE + MENU DESIGN ────────────────────────
   // Every Alt+right-click menu is built by its own opener (row, card, component,
   // reveal, image, link, table...). positionMenu() is the one place they all pass
-  // through, so the merging and the fly-out layout happen there:
-  //  • PARENT LEVELS: the menu for what you clicked gets the menus of every
-  //    structural parent (card, component, click-and-reveal, row) appended as
-  //    "In: Row" etc. So a row colour can be changed from inside any component.
-  //    Parent menus are built by calling the real openers in capture mode, so
-  //    they can never drift from the standalone versions.
+  // through, so merging, layout and tidying happen there (decorateMenu):
+  //  • BREADCRUMB: "Row > Accordion item > Card" replaces the title.
+  //  • PARENT LEVELS: the menus of every structural parent (card, component,
+  //    click-and-reveal, row) are appended as expandable sections, so a row
+  //    colour can be changed from inside any component. Parent menus are built
+  //    by calling the real openers in capture mode, so they never drift.
+  //  • TIDY: leading symbols are stripped from labels, line icons are added,
+  //    destructive actions are moved to a red group at the bottom.
   //  • STYLE (Settings, gear in the panel header): "flyout" (default) turns each
-  //    sub-heading group into a pop-out entry; "flat" keeps one list with
-  //    collapsible parent sections.
+  //    group into a pop-out entry; "flat" keeps one list.
   const MENU_STYLE_KEY = 'bb-menu-style';
   function getMenuStyle() {
     try { return GM_getValue(MENU_STYLE_KEY, 'flyout') === 'flat' ? 'flat' : 'flyout'; } catch { return 'flyout'; }
@@ -5897,6 +5920,94 @@ function addParagraphToRow(rowEl) {
 
   let _pendingCtx = null;   // set by onContextMenu for the first menu of a right-click
   let _capture = null;      // when set, positionMenu hands the built menu back instead of showing it
+
+  // ── icons (inline line icons, drawn in currentColor) ──
+  const BB_ICONS = {
+    plus:   '<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M12 8v8M8 12h8"/>',
+    para:   '<path d="M13 4v16M17 4v16M13 4H9.5a4 4 0 0 0 0 8H13"/>',
+    brk:    '<path d="M5 6v5a3 3 0 0 0 3 3h11M15 10l4 4-4 4"/>',
+    wrap:   '<rect x="3" y="3" width="18" height="18" rx="3"/><rect x="8" y="8" width="8" height="8" rx="1.5"/>',
+    copy:   '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>',
+    trash:  '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
+    star:   '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/>',
+    palette:'<path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.5-.7 1.2-1.5-.4-1 .3-2 1.4-2H17a4 4 0 0 0 4-4c0-5-4-10.5-9-10.5z"/><circle cx="8" cy="11" r="1"/><circle cx="12" cy="7.5" r="1"/><circle cx="16" cy="11" r="1"/>',
+    layers: '<path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/>',
+    row:    '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 12h18"/>',
+    card:   '<rect x="4" y="5" width="16" height="14" rx="2"/><path d="M8 10h8M8 14h5"/>',
+    split:  '<path d="M3 12h18M12 4v5M12 15v5"/>',
+    swap:   '<path d="M7 7h12l-3-3M17 17H5l3 3"/>',
+    up:     '<path d="M12 19V5M6 11l6-6 6 6"/>',
+    down:   '<path d="M12 5v14M6 13l6 6 6-6"/>',
+    wrench: '<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18v3h3l6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.5-2.5z"/>',
+    table:  '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 4v16"/>',
+    file:   '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/>',
+    image:  '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.5"/><path d="M4 18l5-5 4 4 3-3 4 4"/>',
+    link:   '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+    chev:   '<path d="M9 6l6 6-6 6"/>',
+  };
+  // First match wins. Tested against the cleaned, lower-case label.
+  const ICON_RULES = [
+    [/delete|remove|\bcut\b|trash/, 'trash'],
+    [/copy|duplicate/, 'copy'],
+    [/line break|<br>/, 'brk'],
+    [/paragraph/, 'para'],
+    [/wrap/, 'wrap'],
+    [/split/, 'split'],
+    [/convert|swap/, 'swap'],
+    [/move up/, 'up'],
+    [/move down/, 'down'],
+    [/strip|formatting|utilit/, 'wrench'],
+    [/colou?r|variant|style|background|font/, 'palette'],
+    [/icon/, 'star'],
+    [/insert|add item|^add\b|embed/, 'plus'],
+    [/\brow\b/, 'row'],
+    [/\bcard\b/, 'card'],
+    [/accordion|tabs|carousel|flip|component|item|reveal/, 'layers'],
+    [/table|cell|column/, 'table'],
+    [/pdf|file/, 'file'],
+    [/image|figure|alt text/, 'image'],
+    [/link|url|tracking/, 'link'],
+  ];
+  function iconKeyFor(text) {
+    const t = (text || '').toLowerCase();
+    for (const [re, k] of ICON_RULES) if (re.test(t)) return k;
+    return null;
+  }
+  function icoSpan(key) {
+    const s = document.createElement('span');
+    s.className = 'bb-ico' + (key ? '' : ' bb-ico-empty');
+    s.setAttribute('aria-hidden', 'true');
+    if (key && BB_ICONS[key]) {
+      s.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${BB_ICONS[key]}</svg>`;
+    } else s.className = 'bb-ico bb-ico-empty';
+    return s;
+  }
+  function chevSvg(size) {
+    return `<svg width="${size || 14}" height="${size || 14}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${BB_ICONS.chev}</svg>`;
+  }
+
+  // Swatch chips (card variants, row colours).
+  const CHIP_BG = {
+    none: 'repeating-linear-gradient(45deg,#fff,#fff 3px,#e5e8eb 3px,#e5e8eb 6px)',
+    white: '#fff', primary: '#002d72', secondary: '#6f42c1', tertiary: '#c9a227', navy: '#002d72', gold: '#c9a227',
+    green: '#198754', forest: '#1b4332', purple: '#6f42c1', lavender: '#b9a7e0', lightblue: '#9ec5fe', red: '#dc3545', yellow: '#ffc107',
+  };
+  function buildChipRow(items, current, onPick, shape) {
+    const row = document.createElement('div');
+    row.className = 'bb-chip-row' + (shape === 'sq' ? ' bb-chip-sq' : '');
+    items.forEach(it => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      const isCur = it.value === current;
+      b.className = 'bb-chip' + (isCur ? ' is-current' : '');
+      b.style.background = CHIP_BG[it.bg] || it.bg || '#fff';
+      b.setAttribute('aria-label', it.label + (isCur ? ', current' : ''));
+      b.title = it.label + (isCur ? ' (current)' : '');
+      b.addEventListener('click', () => { onPick(it.value); closeAnyMenu(); });
+      row.appendChild(b);
+    });
+    return row;
+  }
 
   const CTX_COMP_SEL = '.accordion, .horizontal-tabs, .vertical-tabs-wrapper, .flip-cards, ' +
                        '.text-carousel, .image-carousel, .reveal-table';
@@ -5918,6 +6029,12 @@ function addParagraphToRow(rowEl) {
     return null;
   }
 
+  // Lower-case noun for menu labels: "card", "accordion", "row"...
+  function nounFor(el) {
+    const lv = parentLevelOf(el);
+    return lv ? lv.label.toLowerCase() : 'component';
+  }
+
   function captureLevelMenu(lv, x, y, tgt) {
     const prev = _capture;
     _capture = { menu: null };
@@ -5927,44 +6044,150 @@ function addParagraphToRow(rowEl) {
     return m;
   }
 
+  // ── tidy: labels, icons, destructive group ──
+  const NO_TIDY_SEL = '.bb-chip, .bb-swatch-btn, .bb-hex-apply, .bb-ctx-close, .bb-level-toggle, .bb-fly-head, .bb-crumb';
+  function tidyButton(b) {
+    if (b.dataset.bbTidy || b.matches(NO_TIDY_SEL) || b.querySelector('.bb-swatch')) return;
+    b.dataset.bbTidy = '1';
+    const first = b.firstChild;
+    if (first && first.nodeType === 3 && b.childNodes.length === 1) {
+      // strip leading pictograms / arrows / bullets (keeps ✓, letters, digits, quotes)
+      first.nodeValue = first.nodeValue.replace(/^[^\p{L}\p{N}"'✓(<]+/u, '');
+    }
+    b.insertBefore(icoSpan(iconKeyFor(b.textContent)), b.firstChild);
+  }
+  function tidyNode(n) {
+    if (!n.querySelectorAll) return;
+    if (n.tagName === 'BUTTON') tidyButton(n);
+    else n.querySelectorAll('button').forEach(tidyButton);
+  }
+
+  // Remove headers that no longer head anything.
+  function dropEmptyHeaders(nodes) {
+    const out = [];
+    nodes.forEach((n, i) => {
+      if (n.classList && n.classList.contains('bb-ctx-sub')) {
+        const next = nodes[i + 1];
+        if (!next || (next.classList && next.classList.contains('bb-ctx-sub'))) { n.remove(); return; }
+      }
+      out.push(n);
+    });
+    return out;
+  }
+
+  // Tidy a node list and split destructive buttons off.
+  function prepNodes(nodes) {
+    nodes.forEach(tidyNode);
+    const danger = [], rest = [];
+    nodes.forEach(n => { (n.matches && n.matches('button.bb-danger') ? danger : rest).push(n); });
+    return { rest: dropEmptyHeaders(rest), danger };
+  }
+  function appendDangerZone(container, danger) {
+    if (!danger.length) return;
+    const div = document.createElement('div');
+    div.className = 'bb-ctx-div';
+    container.appendChild(div);
+    danger.forEach(d => container.appendChild(d));
+  }
+
+  // ── parent levels ──
   function appendParentLevels(menu, ctx, x, y) {
     const stop = tinyDoc && tinyDoc.body;
     const seen = new Set();
     const self = parentLevelOf(ctx.n);
     if (self) seen.add(self.el);
-    const levels = [];
+    const lvls = [];
     for (let a = ctx.n.parentElement; a && a !== stop; a = a.parentElement) {
       const lv = parentLevelOf(a);
-      if (lv && !seen.has(lv.el)) { seen.add(lv.el); levels.push(lv); }
+      if (lv && !seen.has(lv.el)) { seen.add(lv.el); lvls.push(lv); }
     }
-    levels.forEach(lv => {
+    const flyout = getMenuStyle() === 'flyout';
+    const infos = [];
+    lvls.forEach(lv => {
       const cap = captureLevelMenu(lv, x, y, ctx.tgt);
       if (!cap) return;
       const nodes = Array.from(cap.children).filter(c => !c.classList.contains('bb-ctx-title') && !c.classList.contains('bb-ctx-close'));
       if (!nodes.length) return;
+      const { rest, danger } = prepNodes(nodes);
       const wrap = document.createElement('div');
       wrap.className = 'bb-ctx-level';
       wrap.dataset.title = lv.label;
       const toggle = document.createElement('button');
       toggle.type = 'button';
       toggle.className = 'bb-level-toggle';
-      toggle.textContent = '▸ In: ' + lv.label;
+      toggle.setAttribute('aria-expanded', 'false');
+      const lab = document.createElement('span');
+      lab.className = 'bb-level-label';
+      lab.textContent = lv.label;
+      const arrow = document.createElement('span');
+      arrow.className = 'bb-fly-arrow bb-level-arrow';
+      arrow.innerHTML = chevSvg(14);
+      toggle.appendChild(icoSpan(iconKeyFor(lv.label)));
+      toggle.appendChild(lab);
+      toggle.appendChild(arrow);
       const body = document.createElement('div');
       body.className = 'bb-ctx-level-body';
       body.style.display = 'none';
-      nodes.forEach(n => body.appendChild(n));
-      toggle.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const open = body.style.display === 'none';
+      (flyout ? buildFlyNodes(rest) : rest).forEach(n => body.appendChild(n));
+      appendDangerZone(body, danger);
+      const setOpen = (open) => {
         body.style.display = open ? '' : 'none';
-        toggle.textContent = (open ? '▾ In: ' : '▸ In: ') + lv.label;
-      });
+        wrap.classList.toggle('is-open', open);
+        toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      };
+      toggle.addEventListener('click', (e) => { e.stopPropagation(); setOpen(body.style.display === 'none'); });
       wrap.appendChild(toggle);
       wrap.appendChild(body);
-      menu.appendChild(wrap);
+      infos.push({ label: lv.label, wrap, open: () => { setOpen(true); try { wrap.scrollIntoView({ block: 'nearest' }); } catch {} } });
     });
+    if (infos.length) {
+      const head = document.createElement('div');
+      head.className = 'bb-ctx-parents-head';
+      head.textContent = 'Parent levels';
+      menu.appendChild(head);
+      infos.forEach(i => menu.appendChild(i.wrap));
+    }
+    return infos;
   }
 
+  const CRUMB_NAMES = {
+    'table-cell': 'Table cell', 'image-options': 'Image', 'link-menu': 'Link', 'icon-swap': 'Icon',
+    'youtube-menu': 'YouTube', 'pdf-embed-menu': 'PDF', 'iframe-menu': 'Embed', 'animated-icon-header-menu': 'Animated icon',
+  };
+  function crumbLabel(ctx) {
+    const lv = parentLevelOf(ctx.n);
+    if (lv) return lv.label;
+    return CRUMB_NAMES[ctx.label] || 'Selection';
+  }
+  function addBreadcrumb(menu, ctx, infos) {
+    const bar = document.createElement('div');
+    bar.className = 'bb-crumbs';
+    const items = infos.slice().reverse().map(i => ({ label: i.label, info: i }));
+    items.push({ label: crumbLabel(ctx), current: true });
+    items.forEach((it, idx) => {
+      if (idx) {
+        const sep = document.createElement('span');
+        sep.className = 'bb-crumb-sep';
+        sep.setAttribute('aria-hidden', 'true');
+        sep.innerHTML = chevSvg(12);
+        bar.appendChild(sep);
+      }
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'bb-crumb' + (it.current ? ' is-current' : '');
+      b.textContent = it.label;
+      if (it.info) {
+        b.title = 'Show ' + it.label + ' options';
+        b.addEventListener('click', (e) => { e.stopPropagation(); it.info.open(); });
+      } else b.disabled = true;
+      bar.appendChild(b);
+    });
+    const title = menu.querySelector(':scope > .bb-ctx-title');
+    if (title) title.remove();
+    menu.insertBefore(bar, menu.firstChild);
+  }
+
+  // ── pop-out groups ──
   function hideFly(w) {
     w.classList.remove('pinned');
     const p = w.querySelector(':scope > .bb-fly-panel');
@@ -5978,10 +6201,12 @@ function addParagraphToRow(rowEl) {
     head.type = 'button';
     head.className = 'bb-fly-head';
     const label = document.createElement('span');
+    label.className = 'bb-fly-label';
     label.textContent = title;
     const arrow = document.createElement('span');
     arrow.className = 'bb-fly-arrow';
-    arrow.textContent = '▸';
+    arrow.innerHTML = chevSvg(14);
+    head.appendChild(icoSpan(iconKeyFor(title)));
     head.appendChild(label);
     head.appendChild(arrow);
     const panel = document.createElement('div');
@@ -6020,27 +6245,22 @@ function addParagraphToRow(rowEl) {
     return wrap;
   }
 
-  // Turn a flat node list (items + .bb-ctx-sub headers + parent levels) into
-  // pop-out entries. Groups with a single item stay inline.
+  // Turn a flat node list (items + .bb-ctx-sub group headers) into pop-out
+  // entries. Groups with a single item stay inline; empty groups vanish.
+  // .bb-ctx-head (a plain heading inside a group) is just another item.
   function buildFlyNodes(nodes) {
     const out = [];
     let group = null;
     const flush = () => {
       if (!group) return;
       if (group.nodes.length <= 1) out.push(...group.nodes);
-      else out.push(makeFlyEntry(group.title, buildFlyNodes(group.nodes)));
+      else out.push(makeFlyEntry(group.title, group.nodes));
       group = null;
     };
     nodes.forEach(n => {
       if (n.classList && n.classList.contains('bb-ctx-sub')) {
         flush();
         group = { title: n.textContent.trim(), nodes: [] };
-        if (n.parentNode) n.parentNode.removeChild(n);
-      } else if (n.classList && n.classList.contains('bb-ctx-level')) {
-        flush();
-        const body = n.querySelector(':scope > .bb-ctx-level-body');
-        const items = body ? Array.from(body.children) : [];
-        out.push(makeFlyEntry('In: ' + (n.dataset.title || 'Parent'), buildFlyNodes(items)));
         if (n.parentNode) n.parentNode.removeChild(n);
       } else if (group) group.nodes.push(n);
       else out.push(n);
@@ -6051,10 +6271,14 @@ function addParagraphToRow(rowEl) {
 
   function decorateMenu(menu, ctx, x, y) {
     try {
-      if (ctx && ctx.n && tinyDoc) appendParentLevels(menu, ctx, x, y);
-      if (getMenuStyle() === 'flyout') {
-        const kids = Array.from(menu.children).filter(c => !c.classList.contains('bb-ctx-title') && !c.classList.contains('bb-ctx-close'));
-        buildFlyNodes(kids).forEach(n => menu.appendChild(n));
+      const flyout = getMenuStyle() === 'flyout';
+      const nodes = Array.from(menu.children).filter(c => !c.classList.contains('bb-ctx-title') && !c.classList.contains('bb-ctx-close'));
+      const { rest, danger } = prepNodes(nodes);
+      (flyout ? buildFlyNodes(rest) : rest).forEach(n => menu.appendChild(n));
+      appendDangerZone(menu, danger);
+      if (ctx && ctx.n && tinyDoc) {
+        const infos = appendParentLevels(menu, ctx, x, y);
+        addBreadcrumb(menu, ctx, infos);
       }
     } catch (err) { dbg('decorateMenu failed (menu left as built)', err); }
   }
@@ -6065,7 +6289,7 @@ function addParagraphToRow(rowEl) {
       <div class="bb-rule-form">
         <div style="font-weight:700;">Right-click menu style</div>
         <label class="bb-rule-inline"><input type="radio" name="bb-menu-style" value="flyout"${cur === 'flyout' ? ' checked' : ''}> Pop-out: each group opens beside the menu (default)</label>
-        <label class="bb-rule-inline"><input type="radio" name="bb-menu-style" value="flat"${cur === 'flat' ? ' checked' : ''}> Flat list: everything in one column, parent sections collapsed</label>
+        <label class="bb-rule-inline"><input type="radio" name="bb-menu-style" value="flat"${cur === 'flat' ? ' checked' : ''}> Flat list: everything in one column</label>
         <div class="bb-hint">Applies from the next Alt+right-click. Saved in Tampermonkey storage for this browser profile.</div>
       </div>
       <div class="bb-fix-actions"><button id="bb-set-close" class="bb-btn bb-btn-goto">Close</button></div>`);
@@ -6317,42 +6541,34 @@ function addParagraphToRow(rowEl) {
     const menu = document.createElement('div');
     menu.id = 'bb-card-menu';
     menu.className = 'bb-ctx-menu';
-    menu.innerHTML = `<div class="bb-ctx-title">Card</div>`;
+    menu.innerHTML = `<div class="bb-ctx-title">Card</div><div class="bb-ctx-head">Card style</div>`;
     const add = (label, fn) => {
       const btn = document.createElement('button');
       btn.textContent = label;
       btn.addEventListener('click', () => { fn(); closeAnyMenu(); });
       menu.appendChild(btn);
     };
-    const sepV = document.createElement('div');
-    sepV.className = 'bb-ctx-sub';
-    sepV.textContent = 'Variant';
-    menu.appendChild(sepV);
-    CARD_VARIANTS.forEach(v => {
-      add((v === current ? '✓ ' : '') + v.charAt(0).toUpperCase() + v.slice(1), () => cardSetVariant(cardEl, v));
-    });
-    const sepI = document.createElement('div');
-    sepI.className = 'bb-ctx-sub';
-    sepI.textContent = 'Icon (card-with-icon layout)';
-    menu.appendChild(sepI);
+    menu.appendChild(buildChipRow(
+      CARD_VARIANTS.map(v => ({ value: v, label: v.charAt(0).toUpperCase() + v.slice(1), bg: v })),
+      current, v => cardSetVariant(cardEl, v), 'round'));
+    const slotFn = () => {
+      const slot = firstEditable(cardEl.querySelector('.card-body'));
+      return slot ? { slot, afterEl: tgt ? directChildOf(slot, tgt) : null, label: 'this card' } : null;
+    };
+    appendQuickItems(menu, cardEl, x, y, slotFn);
+    appendInsertGroup(menu, cardEl, x, y, slotFn);
+    utilHead(menu, 'Icon and header', 'bb-ctx-sub');
     if (hasIcon) {
       const iconI = cardEl.querySelector('.icon-column i[class*="bi-"]');
       if (iconI) add('Change icon…', () => openIconModal(iconI));
     }
-    add(hasIcon ? 'Remove icon header (Bootstrap icon)' : 'Add icon header (Bootstrap icon)', () => cardToggleIcon(cardEl));
-    const sepA = document.createElement('div');
-    sepA.className = 'bb-ctx-sub';
-    sepA.textContent = 'Animated icon';
-    menu.appendChild(sepA);
+    add(hasIcon ? 'Remove icon header' : 'Add icon header', () => cardToggleIcon(cardEl));
     if (cardHasAnimatedIcon(cardEl)) {
       add('Remove animated icon', () => cardRemoveAnimatedIconHeader(cardEl));
     } else {
       add('Add animated icon in header…', () => cardAddAnimatedIconHeader(cardEl));
     }
-    appendComponentUtilityItems(menu, cardEl, x, y, () => {
-      const slot = firstEditable(cardEl.querySelector('.card-body'));
-      return slot ? { slot, afterEl: tgt ? directChildOf(slot, tgt) : null, label: 'this card' } : null;
-    });
+    appendCopyGroup(menu, cardEl);
 
     positionMenu(menu, x, y);
   }
@@ -7241,19 +7457,48 @@ function addParagraphToRow(rowEl) {
       .bb-swatch-red       { background: #dc3545; }
       .bb-swatch-yellow    { background: #ffc107; }
 
-      /* Pop-out groups and merged parent levels */
-      .bb-ctx-menu .bb-fly-head { justify-content: space-between; }
-      .bb-ctx-menu .bb-fly-arrow { opacity: .55; margin-left: 14px; }
+      /* Menu design: breadcrumb, chips, icons, groups, danger zone */
+      .bb-ctx-menu { min-width: 300px; padding: 6px; border-radius: 10px; box-shadow: 0 8px 28px rgba(16,24,40,.2); }
+      .bb-ctx-menu button { gap: 10px; padding: 9px 10px; border-radius: 6px; }
+      .bb-ctx-menu .bb-ico { flex: 0 0 18px; width: 18px; height: 18px; color: #002d72; display: inline-flex; align-items: center; justify-content: center; }
+      .bb-ctx-menu .bb-ico-empty { color: transparent; }
+      .bb-ctx-menu button:hover .bb-ico { color: #fff; }
+      .bb-ctx-menu button.bb-danger { background: #fdecea; color: #b42318; }
+      .bb-ctx-menu button.bb-danger .bb-ico { color: #b42318; }
+      .bb-ctx-menu button.bb-danger:hover .bb-ico { color: #fff; }
+      .bb-ctx-menu .bb-ctx-div { height: 1px; background: #e3e8ec; margin: 6px 4px; }
+      .bb-ctx-menu .bb-ctx-sub, .bb-ctx-menu .bb-ctx-head, .bb-ctx-menu .bb-ctx-parents-head {
+        font-size: 11.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #002d72; padding: 10px 10px 4px;
+      }
+      .bb-ctx-menu .bb-ctx-parents-head { border-top: 1px solid #cdd5dc; margin-top: 8px; padding-top: 12px; }
+      .bb-ctx-menu .bb-hint-r { margin-left: auto; font-size: 12px; color: #5b6469; }
+      .bb-ctx-menu button:hover .bb-hint-r { color: #fff; }
+      .bb-ctx-menu .bb-fly-head, .bb-ctx-menu .bb-level-toggle { justify-content: flex-start; }
+      .bb-ctx-menu .bb-fly-label, .bb-ctx-menu .bb-level-label { flex: 1; }
+      .bb-ctx-menu .bb-fly-arrow { margin-left: auto; opacity: .6; display: inline-flex; }
       .bb-ctx-menu .bb-fly-head:hover .bb-fly-arrow { opacity: 1; }
+      .bb-ctx-menu .bb-level-toggle { font-weight: 600; }
+      .bb-ctx-menu .bb-ctx-level.is-open > .bb-level-toggle { background: #f1f4f6; }
+      .bb-ctx-menu .bb-ctx-level.is-open > .bb-level-toggle:hover { background: #002d72; }
+      .bb-ctx-menu .bb-ctx-level.is-open > .bb-level-toggle .bb-level-arrow { transform: rotate(90deg); }
+      .bb-ctx-menu .bb-ctx-level-body { margin: 4px 0 6px 14px; padding-left: 8px; border-left: 2px solid #d9e2ec; }
       .bb-ctx-menu .bb-fly-panel {
         display: none; position: fixed; z-index: 2000002;
-        min-width: 220px; max-width: 340px; max-height: calc(100vh - 16px); overflow-y: auto;
-        background: #fff; border: 1px solid #cdd5dc; border-radius: 6px;
-        box-shadow: 0 4px 16px rgba(0,0,0,.22); padding: 4px;
+        min-width: 260px; max-width: 360px; max-height: calc(100vh - 16px); overflow-y: auto;
+        background: #fff; border: 1px solid #cdd5dc; border-radius: 10px;
+        box-shadow: 0 8px 28px rgba(16,24,40,.22); padding: 6px;
       }
-      .bb-ctx-menu .bb-level-toggle { font-weight: 700; color: #002d72; border-top: 1px solid #e3e8ec; border-radius: 0; margin-top: 4px; }
-      .bb-ctx-menu .bb-level-toggle:hover { color: #fff; }
-      .bb-ctx-menu .bb-ctx-level-body { padding-left: 8px; border-left: 2px solid #d9e2ec; margin-left: 6px; }
+      .bb-ctx-menu .bb-chip-row { display: flex; flex-wrap: wrap; gap: 8px; padding: 4px 10px 8px; }
+      .bb-ctx-menu .bb-chip-sq { gap: 4px; }
+      .bb-ctx-menu button.bb-chip { width: 30px; height: 30px; min-width: 0; padding: 0; border-radius: 50%; border: 1px solid rgba(0,0,0,.25); flex: 0 0 auto; }
+      .bb-ctx-menu .bb-chip-sq button.bb-chip { width: 19px; height: 19px; border-radius: 4px; }
+      .bb-ctx-menu button.bb-chip.is-current { border: 2px solid #002d72; box-shadow: 0 0 0 2px #fff inset; }
+      .bb-ctx-menu button.bb-chip:hover { outline: 2px solid #002d72; outline-offset: 1px; }
+      .bb-ctx-menu .bb-crumbs { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; padding: 6px 28px 10px 6px; border-bottom: 1px solid #e3e8ec; margin-bottom: 6px; }
+      .bb-ctx-menu button.bb-crumb { width: auto; padding: 3px 9px; border-radius: 12px; background: #f1f4f6; color: #5b6469; font-size: 12.5px; }
+      .bb-ctx-menu button.bb-crumb:hover { background: #002d72; color: #fff; }
+      .bb-ctx-menu button.bb-crumb.is-current { background: #002d72; color: #fff; font-weight: 700; cursor: default; }
+      .bb-ctx-menu .bb-crumb-sep { color: #6e7477; display: inline-flex; }
 
       /* Table menu specifics */
       .bb-table-menu { min-width: 248px; }
