@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         Block Builder Edit Toolkit
 // @namespace    rcpi-block-builder
-// @description  Alt+right-click toolkit for the RCPI block builder: tables, wrap+columns, convert, item-ops, row colour/insert/align, icon swap, image figure/decorative/transcript/search, fix/repair, outline, find & replace, citation linking, strip formatting, Alt-hint overlay, leader-key shortcuts, new-page filename slugify, backend filename display, Manage Files launcher + popup locator. Left dock. Alt-text copilot link.
+// @description  Alt+right-click toolkit for the RCPI block builder: tables, wrap+columns, convert, item-ops, row colour/insert/align, icon swap, image figure/decorative/transcript/search, fix/repair, outline, find & replace, saved replacement rules, citation linking, strip formatting, Alt-hint overlay, leader-key shortcuts, new-page filename slugify, backend filename display, Manage Files launcher + popup locator. Left dock. Alt-text copilot link.
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      9.1
+// @version      9.2
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -1234,6 +1234,19 @@
       } catch (e) { dbg('custom fix checks failed', e); }
     }
 
+    // Saved replacement rules (Replaces tab): each ticked rule with matches is a fix.
+    try {
+      loadRules().filter(r => r.enabled).forEach(r => {
+        const res = runRule(r, body, true);
+        if (res.error) { reviews.push({ category: 'Replacements', el: null, label: `Rule "${r.name || ruleSummary(r)}" is invalid: ${res.error}` }); return; }
+        if (res.count) fixes.push({
+          id: fid(), category: 'Replacements',
+          label: `${r.name || ruleSummary(r)}: ${res.count} match(es)${res.skipped ? ` (${res.skipped} skipped)` : ''}`,
+          apply: (b) => { runRule(r, b || body, false); }
+        });
+      });
+    } catch (e) { dbg('replacement rules failed', e); }
+
     return { fixes, reviews };
   }
 
@@ -2069,6 +2082,7 @@
           <button class="bb-tab active" data-tab="components">Components</button>
           <button class="bb-tab" data-tab="audit">Audit</button>
           <button class="bb-tab" data-tab="history">History</button>
+          <button class="bb-tab" data-tab="replacements">Replaces</button>
         </div>
         <div id="bb-tk-panels">
           <div id="bb-tk-components" class="bb-tabpanel active">
@@ -2100,6 +2114,18 @@
             <div class="bb-snip-divider">⭐ Saved snippets</div>
             <p class="bb-hint">Reusable rows you saved. Alt+right-click a row → “Save row as snippet”.</p>
             <div id="bb-tk-snip-list"></div>
+          </div>
+          <div id="bb-tk-replacements" class="bb-tabpanel">
+            <p class="bb-hint">Saved find/replace rules. Ticked rules run from here and also appear in <b>Check &amp; fix page issues</b>. The number is the match count on this page. Rules run top to bottom.</p>
+            <div class="bb-tk-toolrow">
+              <button id="bb-tk-rule-add" class="bb-btn bb-btn-plus">+ Add rule</button>
+              <button id="bb-tk-rule-run" class="bb-btn bb-btn-fix" title="Run every ticked rule on this page (snapshot saved first)">▶ Run ticked</button>
+            </div>
+            <div class="bb-tk-toolrow">
+              <button id="bb-tk-rule-export" class="bb-btn bb-btn-goto">Export</button>
+              <button id="bb-tk-rule-import" class="bb-btn bb-btn-goto">Import</button>
+            </div>
+            <div id="bb-tk-rules-list"></div>
           </div>
         </div>
         <div id="bb-tk-footer">
@@ -2198,8 +2224,15 @@
         if (btn.dataset.tab === 'components') refreshComponentList();
         if (btn.dataset.tab === 'audit') refreshAuditList();
         if (btn.dataset.tab === 'history') { refreshHistoryList(); refreshSnippetList(); }
+        if (btn.dataset.tab === 'replacements') refreshRulesList();
       });
     });
+
+    // Replaces tab buttons
+    panel.querySelector('#bb-tk-rule-add').addEventListener('click', () => { syncTinyRefs(); openRuleEditor(null); });
+    panel.querySelector('#bb-tk-rule-run').addEventListener('click', () => runRulesNow(loadRules().filter(r => r.enabled)));
+    panel.querySelector('#bb-tk-rule-export').addEventListener('click', openRulesExport);
+    panel.querySelector('#bb-tk-rule-import').addEventListener('click', openRulesImport);
 
     // Minimise to / restore from the thin left bar.
     panel.querySelector('#bb-tk-min').addEventListener('click', () => setMinimized(true));
@@ -6714,6 +6747,20 @@ function addParagraphToRow(rowEl) {
         flex-direction: column;
       }
       .bb-fr-input { width: 100%; box-sizing: border-box; padding: 5px 7px; border: 1px solid #cdd5dc; border-radius: 4px; font-size: 13px; }
+      .bb-rule-form { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: #4a5560; }
+      .bb-rule-form label { display: flex; flex-direction: column; gap: 2px; }
+      .bb-rule-form label.bb-rule-inline { flex-direction: row; align-items: center; gap: 6px; }
+      .bb-rule { display: flex; align-items: center; gap: 6px; padding: 6px 4px; border-bottom: 1px solid #eceff1; }
+      .bb-rule-off .bb-rule-main { opacity: .5; }
+      .bb-rule-main { flex: 1; min-width: 0; }
+      .bb-rule-name { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+      .bb-rule-sum { font-size: 11px; color: #6e7477; overflow-wrap: anywhere; font-family: monospace; }
+      .bb-rule-badge { flex: 0 0 auto; min-width: 20px; text-align: center; font-size: 11px; border-radius: 10px; padding: 1px 6px; background: #eceff1; color: #6e7477; }
+      .bb-rule-hit { background: #d1e7dd; color: #0f5132; font-weight: 700; }
+      .bb-rule-bad { background: #f8d7da; color: #842029; font-weight: 700; }
+      .bb-rule-btns { display: flex; flex: 0 0 auto; gap: 2px; }
+      .bb-rule-btns button { border: 1px solid #cdd5dc; background: #fff; border-radius: 3px; cursor: pointer; font-size: 12px; padding: 0 5px; line-height: 20px; }
+      .bb-rule-btns button:disabled { opacity: .3; cursor: default; }
       #bb-tk-resize {
         position: absolute;
         top: 0; right: -3px; bottom: 0;
@@ -6763,8 +6810,8 @@ function addParagraphToRow(rowEl) {
         background: #f8f9fa;
       }
       .bb-tab {
-        flex: 1; padding: 8px 6px; border: none;
-        background: none; cursor: pointer; font-size: 14px;
+        flex: 1; padding: 8px 4px; border: none;
+        background: none; cursor: pointer; font-size: 13px;
         color: #6e7477; border-bottom: 2px solid transparent;
       }
       .bb-tab.active { color: #002d72; border-bottom-color: #002d72; font-weight: 700; }
@@ -7199,6 +7246,333 @@ function addParagraphToRow(rowEl) {
     });
 
     render();
+  }
+
+  // ─── REPLACEMENT RULES (Replaces tab) ──────────────────────────────────────
+  // Saved, editable find/replace rules. Two types:
+  //  • text:      find (plain / wildcard / regex) -> replace, over text nodes or HTML source
+  //  • structure: CSS selector (+ optional text match) -> set row colour, set card
+  //               variant, add class, remove class
+  // One engine (runRule) serves the tab preview, the tab Run buttons and the
+  // "Check & fix page issues" list, so counts and results can never drift.
+  // Apply always re-resolves targets from the live body, because an earlier rule
+  // (esp. an HTML-scope replace) can invalidate element references.
+  const RULES_KEY = 'bb-replace-rules';
+  const RULE_CLASS_RE = /^[A-Za-z0-9_-]+(\s+[A-Za-z0-9_-]+)*$/;
+
+  function loadRules() {
+    try { const r = JSON.parse(GM_getValue(RULES_KEY, '[]')); return Array.isArray(r) ? r : []; }
+    catch { return []; }
+  }
+  function saveRules(list) {
+    try { GM_setValue(RULES_KEY, JSON.stringify(list)); } catch (err) { dbg('rules save failed', err); }
+  }
+  function newRuleId() { return 'r' + Date.now().toString(36) + Math.floor(Math.random() * 1296).toString(36); }
+
+  // Build a RegExp from a find string. Wildcard: * -> (.*?), ? -> (.) so $1.. work.
+  function ruleRegex(find, mode, matchCase, global, dotAll) {
+    if (!find) throw new Error('Find is empty');
+    let src;
+    if (mode === 'regex') src = find;
+    else if (mode === 'wildcard') {
+      src = '';
+      for (const ch of find) {
+        if (ch === '*') src += '(.*?)';
+        else if (ch === '?') src += '(.)';
+        else src += ch.replace(/[.*+?^${}()|[\]\\\/]/g, '\\$&');
+      }
+    } else src = find.replace(/[.*+?^${}()|[\]\\\/]/g, '\\$&');
+    const re = new RegExp(src, (global ? 'g' : '') + (matchCase ? '' : 'i') + (dotAll ? 's' : ''));
+    if (re.test('')) throw new Error('Pattern matches empty text');
+    re.lastIndex = 0;
+    return re;
+  }
+
+  function ruleReplacement(rule) {
+    const r = rule.replace || '';
+    return rule.mode === 'plain' ? r.replace(/\$/g, '$$$$') : r;
+  }
+
+  // Run (or dry-run) one rule against `body`. Returns { count, skipped, error }.
+  function runRule(rule, body, dry) {
+    const out = { count: 0, skipped: 0, error: null };
+    try {
+      if (rule.type === 'structure') {
+        if (!rule.selector) throw new Error('Selector is empty');
+        let els;
+        try { els = Array.from(body.querySelectorAll(rule.selector)); }
+        catch { throw new Error('Invalid CSS selector'); }
+        if (rule.textMatch) {
+          const tre = ruleRegex(rule.textMatch, rule.textMode || 'plain', !!rule.matchCase, false, true);
+          els = els.filter(el => tre.test(el.textContent || ''));
+        }
+        const seen = new Set();
+        const act = rule.action;
+        const val = (rule.value || '').trim();
+        if ((act === 'add-class' || act === 'remove-class') && (!val || !RULE_CLASS_RE.test(val))) throw new Error('Class name is empty or invalid');
+        if (act === 'row-colour' && val && !ALL_ROW_COLOUR_CLASSES.includes(val)) throw new Error('Unknown row colour: ' + val);
+        if (act === 'card-variant' && !CARD_VARIANTS.includes(val)) throw new Error('Unknown card variant: ' + val);
+        els.forEach(el => {
+          let target = el;
+          if (act === 'row-colour') {
+            target = el.closest('.row');
+            if (!target) { out.skipped++; return; }
+            if (seen.has(target)) return;
+            seen.add(target);
+            if (rule.soloOnly !== false) {
+              const host = target.querySelector(':scope > .editable-row-content') || target;
+              const kids = Array.from(host.children).filter(c => !c.classList.contains('deletion-guard'));
+              if (kids.length !== 1) { out.skipped++; return; }
+            }
+            const has = val ? target.classList.contains(val) : !ALL_ROW_COLOUR_CLASSES.some(c => target.classList.contains(c));
+            const others = ALL_ROW_COLOUR_CLASSES.some(c => c !== val && target.classList.contains(c));
+            if (has && !others) return;
+            out.count++;
+            if (!dry) { ALL_ROW_COLOUR_CLASSES.forEach(c => target.classList.remove(c)); if (val) target.classList.add(val); }
+          } else if (act === 'card-variant') {
+            target = el.matches('.card') ? el : el.closest('.card');
+            if (!target) { out.skipped++; return; }
+            if (seen.has(target)) return;
+            seen.add(target);
+            const has = target.classList.contains('card-' + val);
+            const others = CARD_VARIANTS.some(v => v !== val && target.classList.contains('card-' + v));
+            if (has && !others) return;
+            out.count++;
+            if (!dry) { CARD_VARIANTS.forEach(v => target.classList.remove('card-' + v)); target.classList.add('card-' + val); }
+          } else if (act === 'add-class') {
+            if (seen.has(el)) return;
+            seen.add(el);
+            const cls = val.split(/\s+/);
+            if (cls.every(c => el.classList.contains(c))) return;
+            out.count++;
+            if (!dry) cls.forEach(c => el.classList.add(c));
+          } else if (act === 'remove-class') {
+            if (seen.has(el)) return;
+            seen.add(el);
+            const cls = val.split(/\s+/);
+            if (!cls.some(c => el.classList.contains(c))) return;
+            out.count++;
+            if (!dry) cls.forEach(c => el.classList.remove(c));
+          } else throw new Error('Unknown action');
+        });
+        return out;
+      }
+
+      // text rule
+      const htmlScope = rule.scope === 'html';
+      const re = ruleRegex(rule.find, rule.mode || 'plain', !!rule.matchCase, true, htmlScope);
+      const repl = ruleReplacement(rule);
+      if (htmlScope) {
+        const html = body.innerHTML;
+        out.count = (html.match(re) || []).length;
+        if (!dry && out.count) body.innerHTML = html.replace(re, repl);
+        return out;
+      }
+      const doc = body.ownerDocument;
+      const walker = doc.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+      const nodes = [];
+      let n;
+      while ((n = walker.nextNode())) {
+        if (n.parentElement && n.parentElement.closest('script,style,[data-mce-bogus]')) continue;
+        const m = n.nodeValue.match(re);
+        if (m) { out.count += m.length; nodes.push(n); }
+      }
+      if (!dry) nodes.forEach(t => { if (t.parentNode) t.nodeValue = t.nodeValue.replace(re, repl); });
+      return out;
+    } catch (err) {
+      out.error = err.message || String(err);
+      return out;
+    }
+  }
+
+  function ruleSummary(r) {
+    if (r.type === 'structure') {
+      const a = { 'row-colour': 'row colour', 'card-variant': 'card variant', 'add-class': 'add class', 'remove-class': 'remove class' }[r.action] || r.action;
+      return `${r.selector || '?'}${r.textMatch ? ' ∋ "' + r.textMatch + '"' : ''} → ${a} ${r.value || '(none)'}`;
+    }
+    return `${r.find || '?'} → ${r.replace || '(nothing)'} [${r.mode || 'plain'}${r.scope === 'html' ? ', html' : ''}]`;
+  }
+
+  function openRuleEditor(existing) {
+    const r = existing ? Object.assign({}, existing) : { id: newRuleId(), name: '', enabled: true, type: 'text', mode: 'plain', scope: 'text', matchCase: false, find: '', replace: '', selector: '', textMatch: '', textMode: 'plain', action: 'row-colour', value: 'primary', soloOnly: true };
+    const opt = (v, label, cur) => `<option value="${v}"${cur === v ? ' selected' : ''}>${label}</option>`;
+    showModal(existing ? 'Edit rule' : 'New rule', `
+      <div class="bb-rule-form">
+        <label>Name<input type="text" id="bb-rl-name" class="bb-fr-input" value="${escapeHtml(r.name)}" placeholder="e.g. Learning outcomes card to primary row"></label>
+        <label>Type<select id="bb-rl-type" class="bb-fr-input">${opt('text', 'Text: find and replace', r.type)}${opt('structure', 'Structure: selector and action', r.type)}</select></label>
+        <div id="bb-rl-text">
+          <label>Find<input type="text" id="bb-rl-find" class="bb-fr-input" value="${escapeHtml(r.find)}"></label>
+          <label>Replace with<input type="text" id="bb-rl-replace" class="bb-fr-input" value="${escapeHtml(r.replace)}"></label>
+          <label>Mode<select id="bb-rl-mode" class="bb-fr-input">${opt('plain', 'Plain text', r.mode)}${opt('wildcard', 'Wildcard (* any, ? one char; $1 $2 in replace)', r.mode)}${opt('regex', 'Regex ($1 $2 in replace)', r.mode)}</select></label>
+          <label>Scope<select id="bb-rl-scope" class="bb-fr-input">${opt('text', 'Visible text only', r.scope)}${opt('html', 'HTML source (matches the serialised HTML, can span tags)', r.scope)}</select></label>
+        </div>
+        <div id="bb-rl-struct" style="display:none;">
+          <label>CSS selector<input type="text" id="bb-rl-selector" class="bb-fr-input" value="${escapeHtml(r.selector)}" placeholder=".card-white"></label>
+          <label>Only if its text contains (optional)<input type="text" id="bb-rl-textmatch" class="bb-fr-input" value="${escapeHtml(r.textMatch)}"></label>
+          <label>Text match mode<select id="bb-rl-textmode" class="bb-fr-input">${opt('plain', 'Plain text', r.textMode)}${opt('wildcard', 'Wildcard', r.textMode)}${opt('regex', 'Regex', r.textMode)}</select></label>
+          <label>Action<select id="bb-rl-action" class="bb-fr-input">${opt('row-colour', 'Set colour of the containing row', r.action)}${opt('card-variant', 'Set card variant (white, primary, secondary, tertiary)', r.action)}${opt('add-class', 'Add class to matched element', r.action)}${opt('remove-class', 'Remove class from matched element', r.action)}</select></label>
+          <label>Value<input type="text" id="bb-rl-value" class="bb-fr-input" value="${escapeHtml(r.value)}" placeholder="primary"></label>
+          <label class="bb-rule-inline" id="bb-rl-solo-wrap"><input type="checkbox" id="bb-rl-solo"${r.soloOnly !== false ? ' checked' : ''}> Only recolour rows that contain just this one block (skips shared rows)</label>
+        </div>
+        <label class="bb-rule-inline"><input type="checkbox" id="bb-rl-case"${r.matchCase ? ' checked' : ''}> Match case</label>
+        <div id="bb-rl-result" class="bb-hint" style="margin-top:6px;"></div>
+      </div>
+      <div class="bb-fix-actions"><button id="bb-rl-test" class="bb-btn bb-btn-goto">Test on this page</button> <button id="bb-rl-save" class="bb-btn bb-btn-img">Save rule</button> <button id="bb-rl-cancel" class="bb-btn bb-btn-goto">Cancel</button></div>
+    `);
+    const modal = document.getElementById('bb-modal');
+    if (!modal) return;
+    const $ = s => modal.querySelector(s);
+    const syncType = () => {
+      const t = $('#bb-rl-type').value;
+      $('#bb-rl-text').style.display = t === 'text' ? '' : 'none';
+      $('#bb-rl-struct').style.display = t === 'structure' ? '' : 'none';
+      $('#bb-rl-solo-wrap').style.display = $('#bb-rl-action').value === 'row-colour' ? '' : 'none';
+    };
+    $('#bb-rl-type').addEventListener('change', syncType);
+    $('#bb-rl-action').addEventListener('change', syncType);
+    syncType();
+
+    const read = () => {
+      const t = $('#bb-rl-type').value;
+      return Object.assign({}, r, {
+        name: $('#bb-rl-name').value.trim(), type: t, matchCase: $('#bb-rl-case').checked,
+        find: $('#bb-rl-find').value, replace: $('#bb-rl-replace').value, mode: $('#bb-rl-mode').value, scope: $('#bb-rl-scope').value,
+        selector: $('#bb-rl-selector').value.trim(), textMatch: $('#bb-rl-textmatch').value, textMode: $('#bb-rl-textmode').value,
+        action: $('#bb-rl-action').value, value: $('#bb-rl-value').value.trim(), soloOnly: $('#bb-rl-solo').checked,
+      });
+    };
+    const test = () => {
+      const rule = read();
+      syncTinyRefs();
+      const ed = getTinyEditor();
+      const out = $('#bb-rl-result');
+      if (!ed) { out.innerHTML = '<span style="color:#b00020;">Editor not found.</span>'; return null; }
+      const res = runRule(rule, ed.getBody(), true);
+      if (res.error) out.innerHTML = `<span style="color:#b00020;">${escapeHtml(res.error)}</span>`;
+      else out.textContent = `${res.count} match(es) on this page${res.skipped ? `, ${res.skipped} skipped` : ''}.`;
+      return res;
+    };
+    $('#bb-rl-test').addEventListener('click', test);
+    $('#bb-rl-cancel').addEventListener('click', () => { modal.remove(); refreshRulesList(); });
+    $('#bb-rl-save').addEventListener('click', () => {
+      const rule = read();
+      const ed = getTinyEditor();
+      // Validate with a dry run when an editor is present; otherwise a throwaway div.
+      const probe = ed ? ed.getBody() : document.createElement('div');
+      const res = runRule(rule, probe, true);
+      if (res.error) { $('#bb-rl-result').innerHTML = `<span style="color:#b00020;">${escapeHtml(res.error)}</span>`; return; }
+      if (!rule.name) rule.name = ruleSummary(rule).slice(0, 60);
+      const list = loadRules();
+      const i = list.findIndex(x => x.id === rule.id);
+      if (i >= 0) list[i] = rule; else list.push(rule);
+      saveRules(list);
+      modal.remove();
+      refreshRulesList();
+      toast('✓ Rule saved', 'success');
+    });
+  }
+
+  function refreshRulesList() {
+    const host = document.getElementById('bb-tk-rules-list');
+    if (!host) return;
+    const rules = loadRules();
+    syncTinyRefs();
+    const ed = getTinyEditor();
+    const body = ed ? ed.getBody() : null;
+    if (!rules.length) { host.innerHTML = '<span style="color:#888;font-size:13px;">No rules yet. Click “+ Add rule”.</span>'; return; }
+    host.innerHTML = rules.map((r, i) => {
+      const res = body ? runRule(r, body, true) : { count: 0, skipped: 0, error: null };
+      const badge = res.error ? `<span class="bb-rule-badge bb-rule-bad" title="${escapeHtml(res.error)}">!</span>`
+        : `<span class="bb-rule-badge${res.count ? ' bb-rule-hit' : ''}" title="Matches on this page${res.skipped ? ' (' + res.skipped + ' skipped)' : ''}">${res.count}</span>`;
+      return `<div class="bb-rule${r.enabled ? '' : ' bb-rule-off'}" data-i="${i}">
+        <input type="checkbox" class="bb-rule-chk" ${r.enabled ? 'checked' : ''} title="Include in Run and in Check &amp; fix">
+        <div class="bb-rule-main"><div class="bb-rule-name">${escapeHtml(r.name || '(unnamed)')}</div><div class="bb-rule-sum">${escapeHtml(ruleSummary(r))}</div></div>
+        ${badge}
+        <div class="bb-rule-btns">
+          <button class="bb-rule-up" title="Move up"${i === 0 ? ' disabled' : ''}>↑</button>
+          <button class="bb-rule-down" title="Move down"${i === rules.length - 1 ? ' disabled' : ''}>↓</button>
+          <button class="bb-rule-run" title="Run this rule now">▶</button>
+          <button class="bb-rule-edit" title="Edit">✎</button>
+          <button class="bb-rule-del" title="Delete">✕</button>
+        </div></div>`;
+    }).join('');
+
+    host.querySelectorAll('.bb-rule').forEach(row => {
+      const i = parseInt(row.getAttribute('data-i'), 10);
+      row.querySelector('.bb-rule-chk').addEventListener('change', e => {
+        const list = loadRules(); if (!list[i]) return;
+        list[i].enabled = e.target.checked; saveRules(list); refreshRulesList();
+      });
+      row.querySelector('.bb-rule-up').addEventListener('click', () => { const l = loadRules(); if (i > 0) { [l[i - 1], l[i]] = [l[i], l[i - 1]]; saveRules(l); refreshRulesList(); } });
+      row.querySelector('.bb-rule-down').addEventListener('click', () => { const l = loadRules(); if (i < l.length - 1) { [l[i + 1], l[i]] = [l[i], l[i + 1]]; saveRules(l); refreshRulesList(); } });
+      row.querySelector('.bb-rule-edit').addEventListener('click', () => { const l = loadRules(); if (l[i]) openRuleEditor(l[i]); });
+      row.querySelector('.bb-rule-del').addEventListener('click', () => {
+        const l = loadRules(); if (!l[i]) return;
+        if (!confirm(`Delete rule "${l[i].name || ruleSummary(l[i])}"?`)) return;
+        l.splice(i, 1); saveRules(l); refreshRulesList();
+      });
+      row.querySelector('.bb-rule-run').addEventListener('click', () => { const l = loadRules(); if (l[i]) runRulesNow([l[i]]); });
+    });
+  }
+
+  // Run the given rules in order inside ONE editor write, behind a snapshot.
+  function runRulesNow(rules) {
+    syncTinyRefs();
+    const ed = getTinyEditor();
+    if (!ed) { toast('Editor not found', 'error'); return; }
+    if (!rules.length) { toast('No rules ticked', 'warn'); return; }
+    takeSnapshot('pre-rules');
+    let total = 0, skipped = 0; const errs = [];
+    const ok = tinyWrite((_ed, body) => {
+      rules.forEach(r => {
+        const res = runRule(r, body, false);
+        if (res.error) errs.push(`${r.name || ruleSummary(r)}: ${res.error}`);
+        total += res.count; skipped += res.skipped;
+      });
+    }, 'run replacement rules', { ungated: true });
+    if (!ok) { toast('Editor API unavailable, could not apply', 'error'); return; }
+    toast(`✓ ${total} change(s) from ${rules.length} rule(s)${skipped ? `, ${skipped} skipped` : ''}${errs.length ? `, ${errs.length} rule error(s)` : ''}. Snapshot saved, use Snapshots to undo`, errs.length ? 'warn' : 'success');
+    if (errs.length) dbg('rule errors', errs);
+    scheduleAudit(); refreshComponentList(); refreshRulesList();
+  }
+
+  function openRulesExport() {
+    const json = JSON.stringify(loadRules(), null, 2);
+    showModal('Export rules', `<textarea id="bb-rl-json" class="bb-fr-input" style="height:240px;font-family:monospace;" readonly>${escapeHtml(json)}</textarea>
+      <div class="bb-fix-actions"><button id="bb-rl-copy" class="bb-btn bb-btn-img">Copy</button> <button id="bb-rl-close" class="bb-btn bb-btn-goto">Close</button></div>`);
+    const modal = document.getElementById('bb-modal'); if (!modal) return;
+    modal.querySelector('#bb-rl-close').addEventListener('click', () => modal.remove());
+    modal.querySelector('#bb-rl-copy').addEventListener('click', () => {
+      const ta = modal.querySelector('#bb-rl-json'); ta.select();
+      try { navigator.clipboard.writeText(json).then(() => toast('✓ Copied', 'success'), () => { document.execCommand('copy'); toast('✓ Copied', 'success'); }); }
+      catch { document.execCommand('copy'); toast('✓ Copied', 'success'); }
+    });
+  }
+
+  function openRulesImport() {
+    showModal('Import rules', `<p class="bb-hint">Paste exported JSON. Rules are added to your list, nothing is overwritten.</p>
+      <textarea id="bb-rl-json" class="bb-fr-input" style="height:200px;font-family:monospace;"></textarea>
+      <div id="bb-rl-result" class="bb-hint"></div>
+      <div class="bb-fix-actions"><button id="bb-rl-do" class="bb-btn bb-btn-img">Import</button> <button id="bb-rl-close" class="bb-btn bb-btn-goto">Cancel</button></div>`);
+    const modal = document.getElementById('bb-modal'); if (!modal) return;
+    modal.querySelector('#bb-rl-close').addEventListener('click', () => modal.remove());
+    modal.querySelector('#bb-rl-do').addEventListener('click', () => {
+      const out = modal.querySelector('#bb-rl-result');
+      let arr;
+      try { arr = JSON.parse(modal.querySelector('#bb-rl-json').value); } catch { out.innerHTML = '<span style="color:#b00020;">Not valid JSON.</span>'; return; }
+      if (!Array.isArray(arr)) { out.innerHTML = '<span style="color:#b00020;">Expected a JSON array of rules.</span>'; return; }
+      const probe = document.createElement('div');
+      const good = [];
+      arr.forEach(x => {
+        if (!x || (x.type !== 'text' && x.type !== 'structure')) return;
+        const rule = Object.assign({ enabled: true, name: '' }, x, { id: newRuleId() });
+        if (!runRule(rule, probe, true).error) good.push(rule);
+      });
+      if (!good.length) { out.innerHTML = '<span style="color:#b00020;">No valid rules found.</span>'; return; }
+      saveRules(loadRules().concat(good));
+      modal.remove(); refreshRulesList();
+      toast(`✓ Imported ${good.length} of ${arr.length} rule(s)`, 'success');
+    });
   }
 
   // ─── FIND & REPLACE (moved here from the old Audit Toolkit edit-mode
