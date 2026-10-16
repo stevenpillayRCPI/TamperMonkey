@@ -5,7 +5,7 @@
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      9.6
+// @version      9.7
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -498,6 +498,7 @@
     { type: 'Click and Reveal',   sel: '[class*="reveal-container"]', itemSel: null },
     { type: 'Reveal Table',       sel: '.reveal-table',         itemSel: 'tbody tr' },
     { type: 'Icon List',          sel: '.icon-list',            itemSel: 'li' },
+    { type: 'Timeline',           sel: '.timeline',             itemSel: '.timeline-item' },
     { type: 'Icon Card',          sel: '.card-with-icon',       itemSel: null },
     { type: 'Image',              sel: '.image-container',      itemSel: null },
     { type: 'Image Column',       sel: '.image-column',         itemSel: null },
@@ -2283,7 +2284,7 @@
   const COMP_NO_ADD_TYPES = ['Icon Card', 'Image', 'Image Column', 'Click and Reveal'];
   const COMP_REPLACEABLE_TYPES = ['Accordion', 'Numbered Accordion', 'Icon Accordion',
                        'Horizontal Tabs', 'Vertical Tabs', 'Flipcards',
-                       'Text Carousel', 'Image Carousel', 'Reveal Table', 'Icon List'];
+                       'Text Carousel', 'Image Carousel', 'Reveal Table', 'Icon List', 'Timeline'];
 
   function refreshComponentList() {
     const list = document.getElementById('bb-tk-comp-list');
@@ -2812,6 +2813,10 @@
                           '.tab-pane [contenteditable="true"], ' +
                           '.flip-card-back-body [contenteditable="true"]')
         .forEach(b => { b.innerHTML = '<p>New content</p>'; });
+    // Timeline entry: date, title, description
+    item.querySelectorAll('.timeline-date').forEach(p => { p.textContent = 'Date'; });
+    item.querySelectorAll('.timeline-content h3 span[contenteditable="true"]').forEach(sp => { sp.textContent = 'Title'; });
+    item.querySelectorAll('.timeline-content > div[contenteditable="true"]').forEach(d => { if (!d.querySelector('.timeline-date')) d.innerHTML = '<p>Description.</p>'; });
   }
 
   // Append exactly one new item to a component element (live OR cloned) by
@@ -2846,7 +2851,7 @@
     }
 
     if (type === 'Accordion' || type === 'Numbered Accordion' || type === 'Icon Accordion' ||
-        type === 'Icon List') {
+        type === 'Icon List' || type === 'Timeline') {
       const items = compEl.querySelectorAll(itemSel);
       if (!items.length) return false;
       const newItem = items[items.length - 1].cloneNode(true);
@@ -3206,6 +3211,7 @@
     }
     // accordions + icon list
     if (type === 'Icon List') return tgt.closest('li');
+    if (type === 'Timeline') return tgt.closest('.timeline-item');
     return tgt.closest('.accordion-item');
   }
 
@@ -3222,7 +3228,8 @@
   const CONTENT_SLOT_SEL = '.card-body [contenteditable="true"], .accordion-body [contenteditable="true"], ' +
     '.tab-pane [contenteditable="true"], .flip-card-front-content [contenteditable="true"], ' +
     '.flip-card-back-body [contenteditable="true"], .text-carousel-content [contenteditable="true"], ' +
-    '.carousel-caption [contenteditable="true"], .reveal-item .collapse [contenteditable="true"]';
+    '.carousel-caption [contenteditable="true"], .reveal-item .collapse [contenteditable="true"], ' +
+    '.timeline-content > div[contenteditable="true"]';
 
   function firstEditable(root) {
     return root ? root.querySelector('[contenteditable="true"]:not(.deletion-guard)') : null;
@@ -3292,6 +3299,11 @@
       const item = el.closest('.carousel-item') || compEl.querySelector('.carousel-item.active');
       if (item) slot = firstEditable(item.querySelector(compEl.matches('.text-carousel') ? '.text-carousel-content' : '.carousel-caption'));
       label = 'this slide';
+    } else if (compEl.matches('.timeline')) {
+      const item = el.closest('.timeline-item') || compEl.querySelector('.timeline-item:last-child');
+      const boxes = item ? item.querySelectorAll('.timeline-content > div[contenteditable="true"]') : [];
+      slot = boxes.length ? boxes[boxes.length - 1] : null;
+      label = 'this timeline entry';
     } else if (compEl.matches('.reveal-container')) {
       slot = firstEditable(compEl.querySelector('.reveal-item .collapse'));
       label = 'this reveal';
@@ -4652,7 +4664,7 @@
 
     const x = e.clientX, y = e.clientY;
     const COMP_SEL = '.accordion, .horizontal-tabs, .vertical-tabs-wrapper, .flip-cards, ' +
-                     '.text-carousel, .image-carousel, .reveal-table';
+                     '.text-carousel, .image-carousel, .reveal-table, .timeline';
     const YT_SEL = 'iframe[src*="youtube.com/embed/"], iframe[src*="youtube-nocookie.com/embed/"]';
 
     // Returns [label, opener] for a node, or null. Checked deepest-first.
@@ -6016,7 +6028,7 @@ function addParagraphToRow(rowEl) {
   }
 
   const CTX_COMP_SEL = '.accordion, .horizontal-tabs, .vertical-tabs-wrapper, .flip-cards, ' +
-                       '.text-carousel, .image-carousel, .reveal-table';
+                       '.text-carousel, .image-carousel, .reveal-table, .timeline';
 
   // Structural level for an element, or null. Mirrors the routing in onContextMenu.
   function parentLevelOf(a) {
