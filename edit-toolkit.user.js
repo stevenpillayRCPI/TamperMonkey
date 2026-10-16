@@ -5,7 +5,7 @@
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      9.5
+// @version      9.6
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -5923,6 +5923,9 @@ function addParagraphToRow(rowEl) {
 
   // ── icons (inline line icons, drawn in currentColor) ──
   const BB_ICONS = {
+    text:   '<path d="M4 6h16M4 10h16M4 14h10M4 18h7"/>',
+    timeline: '<path d="M12 3v18"/><circle cx="12" cy="7" r="2"/><circle cx="12" cy="17" r="2"/><path d="M14 7h6M4 17h6"/>',
+    interactive: '<path d="M9 3l10 8-5 1 3 6-3 1-3-6-4 3z"/>',
     plus:   '<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M12 8v8M8 12h8"/>',
     para:   '<path d="M13 4v16M17 4v16M13 4H9.5a4 4 0 0 0 0 8H13"/>',
     brk:    '<path d="M5 6v5a3 3 0 0 0 3 3h11M15 10l4 4-4 4"/>',
@@ -5961,7 +5964,10 @@ function addParagraphToRow(rowEl) {
     [/icon/, 'star'],
     [/insert|add item|^add\b|embed/, 'plus'],
     [/\brow\b/, 'row'],
-    [/\bcard\b/, 'card'],
+    [/\bcards?\b/, 'card'],
+    [/^text\b|\blists?\b|column text/, 'text'],
+    [/timeline/, 'timeline'],
+    [/interactive|quiz|h5p|hotspot/, 'interactive'],
     [/accordion|tabs|carousel|flip|component|item|reveal/, 'layers'],
     [/table|cell|column/, 'table'],
     [/pdf|file/, 'file'],
