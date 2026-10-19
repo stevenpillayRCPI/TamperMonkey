@@ -5,7 +5,7 @@
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      9.9
+// @version      10.0
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -689,18 +689,75 @@
       }
     });
 
-    // 7. Heading hierarchy: rebuild the outline so no heading jumps more than one
-    // level below its parent. A stack of { orig, eff } keeps headings that were
-    // siblings (every item in an accordion, every flip card title) at the same
-    // new level, and keeps deeper headings nested under them (h4 under a lifted
-    // h4 becomes h5 under h3, etc.). A shallower heading ends the section.
-    // The first heading on the page is left as is.
+    // 7. Heading hierarchy, in two steps.
+    // (a) Component consistency: the title headings of one component (accordion
+    //     items, flip card fronts and backs, card row, tab panes, carousel
+    //     captions, timeline items) must all use the level of the FIRST title in
+    //     that component. This is applied virtually (the `want` map) so one fix
+    //     per heading covers both steps.
+    // (b) Outline: rebuild the outline so no heading jumps more than one level
+    //     below its parent. A stack of { orig, eff } keeps headings that were
+    //     siblings at the same new level, and keeps deeper headings nested under
+    //     them (h4 under a lifted h4 becomes h5 under h3, etc.). A shallower
+    //     heading ends the section. The first heading on the page is left as is.
     {
-      const heads = Array.from(body.querySelectorAll('h1,h2,h3,h4,h5,h6'))
+      const HS = 'h1,h2,h3,h4,h5,h6';
+      const HIS = ':is(h1,h2,h3,h4,h5,h6)';
+      const lvlOf = el => parseInt(el.tagName[1], 10);
+      const heads = Array.from(body.querySelectorAll(HS))
         .filter(h => (h.textContent || '').trim() !== '');
+      const headSet = new Set(heads);
+
+      // (a) component groups: heading -> level of the first title in its component
+      const want = new Map();
+      const addGroup = titles => {
+        const t = titles.filter(x => x && headSet.has(x));
+        if (t.length < 2) return;
+        const first = lvlOf(t[0]);
+        t.forEach(x => { if (!want.has(x)) want.set(x, first); });
+      };
+      const rowOf = el => el.closest('.row') || el.parentElement;
+      const byRoot = (items, rootOf) => {
+        const m = new Map();
+        items.forEach(it => { const r = rootOf(it); if (!r) return; if (!m.has(r)) m.set(r, []); m.get(r).push(it); });
+        return m;
+      };
+      const own = (root, sel, rootSel) => Array.from(root.querySelectorAll(sel)).filter(n => n.closest(rootSel) === root);
+
+      body.querySelectorAll('.accordion').forEach(root => {
+        addGroup(own(root, '.accordion-item', '.accordion').map(item => {
+          const hd = item.querySelector('.accordion-header');
+          if (!hd) return null;
+          return hd.matches(HS) ? hd : hd.querySelector(HS);
+        }));
+      });
+      byRoot(Array.from(body.querySelectorAll('.flip-card')), rowOf).forEach(items => {
+        const t = [];
+        items.forEach(it => {
+          t.push(it.querySelector('.flip-card-front-content ' + HIS));
+          t.push(it.querySelector('[class*="flip-card-header"] ' + HIS));
+        });
+        addGroup(t);
+      });
+      byRoot(Array.from(body.querySelectorAll('.card')), rowOf).forEach(items => {
+        addGroup(items.map(c => c.querySelector(HIS + '.card-title')));
+      });
+      byRoot(Array.from(body.querySelectorAll('.tab-pane')), p => p.parentElement).forEach(panes => {
+        addGroup(panes.map(p => p.querySelector(':scope > div[contenteditable="true"] > ' + HIS)));
+      });
+      body.querySelectorAll('.carousel').forEach(root => {
+        addGroup(own(root, '.carousel-item', '.carousel').map(s => s.querySelector('.carousel-caption ' + HIS)));
+      });
+      body.querySelectorAll('.timeline').forEach(root => {
+        addGroup(own(root, '.timeline-item', '.timeline').map(i => i.querySelector('.timeline-content ' + HIS)));
+      });
+
+      // (b) outline rebuild, using the component-adjusted level as the starting point
       const stack = []; // { orig, eff }
       heads.forEach(h => {
-        const orig = parseInt(h.tagName[1], 10);
+        const actual = lvlOf(h);
+        const w = want.get(h);
+        const orig = w !== undefined ? w : actual;
         while (stack.length && stack[stack.length - 1].orig > orig) stack.pop();
         const top = stack[stack.length - 1];
         let eff;
@@ -708,10 +765,18 @@
         else if (top.orig === orig) eff = top.eff;
         else eff = Math.min(orig, top.eff + 1);
         if (!top || top.orig !== orig) stack.push({ orig, eff });
-        if (eff !== orig) {
+        if (eff !== actual) {
+          let label;
+          if (w !== undefined && w !== actual) {
+            label = eff === w
+              ? `Heading differs from the first in its component (h${actual}) → set to h${eff}`
+              : `Heading differs from the first in its component and skips a level (h${actual}) → set to h${eff}`;
+          } else {
+            label = `Heading skips a level (h${actual}) → promote to h${eff}`;
+          }
           fixes.push({
             id: fid(), category: 'Accessibility',
-            label: `Heading skips a level (h${orig}) → promote to h${eff}`,
+            label,
             apply: () => {
               const repl = tinyDoc.createElement('h' + eff);
               for (const a of Array.from(h.attributes)) repl.setAttribute(a.name, a.value);
