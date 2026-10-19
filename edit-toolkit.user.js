@@ -5,7 +5,7 @@
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      9.8
+// @version      9.9
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -689,30 +689,41 @@
       }
     });
 
-    // 7. Heading hierarchy: a heading that jumps more than one level below the
-    // previous one (e.g. h2 → h4) can be promoted one level. Re-running catches
-    // deeper chains.
+    // 7. Heading hierarchy: rebuild the outline so no heading jumps more than one
+    // level below its parent. A stack of { orig, eff } keeps headings that were
+    // siblings (every item in an accordion, every flip card title) at the same
+    // new level, and keeps deeper headings nested under them (h4 under a lifted
+    // h4 becomes h5 under h3, etc.). A shallower heading ends the section.
+    // The first heading on the page is left as is.
     {
       const heads = Array.from(body.querySelectorAll('h1,h2,h3,h4,h5,h6'))
         .filter(h => (h.textContent || '').trim() !== '');
-      let prevLevel = null;
+      const stack = []; // { orig, eff }
       heads.forEach(h => {
-        const lvl = parseInt(h.tagName[1], 10);
-        if (prevLevel !== null && lvl > prevLevel + 1) {
-          const targetLvl = prevLevel + 1;
+        const orig = parseInt(h.tagName[1], 10);
+        while (stack.length && stack[stack.length - 1].orig > orig) stack.pop();
+        const top = stack[stack.length - 1];
+        let eff;
+        if (!top) eff = orig;
+        else if (top.orig === orig) eff = top.eff;
+        else eff = Math.min(orig, top.eff + 1);
+        if (!top || top.orig !== orig) stack.push({ orig, eff });
+        if (eff !== orig) {
           fixes.push({
             id: fid(), category: 'Accessibility',
-            label: `Heading skips a level (${h.tagName.toLowerCase()} after h${prevLevel}) → promote to h${targetLvl}`,
+            label: `Heading skips a level (h${orig}) → promote to h${eff}`,
             apply: () => {
-              const repl = tinyDoc.createElement('h' + targetLvl);
+              const repl = tinyDoc.createElement('h' + eff);
               for (const a of Array.from(h.attributes)) repl.setAttribute(a.name, a.value);
+              // keep ARIA in step: the heading itself and any role="heading" wrapper
+              // (accordion headers wrap the real <h3> in a div with aria-level)
+              if (repl.hasAttribute('aria-level')) repl.setAttribute('aria-level', String(eff));
+              const wrap = h.parentElement && h.parentElement.closest('[role="heading"][aria-level]');
+              if (wrap) wrap.setAttribute('aria-level', String(eff));
               while (h.firstChild) repl.appendChild(h.firstChild);
               h.replaceWith(repl);
             }
           });
-          prevLevel = targetLvl;
-        } else {
-          prevLevel = lvl;
         }
       });
     }
@@ -2815,7 +2826,7 @@
         .forEach(b => { b.innerHTML = '<p>New content</p>'; });
     // Timeline entry: date, title, description
     item.querySelectorAll('.timeline-date').forEach(p => { p.textContent = 'Date'; });
-    item.querySelectorAll('.timeline-content h3 span[contenteditable="true"]').forEach(sp => { sp.textContent = 'Title'; });
+    item.querySelectorAll('.timeline-content :is(h1,h2,h3,h4,h5,h6) span[contenteditable="true"]').forEach(sp => { sp.textContent = 'Title'; });
     item.querySelectorAll('.timeline-content > div[contenteditable="true"]').forEach(d => { if (!d.querySelector('.timeline-date')) d.innerHTML = '<p>Description.</p>'; });
   }
 
@@ -2837,9 +2848,9 @@
       const newCol = lastCol.cloneNode(true);
       reidSubtree(newCol, token);
       // fresh flip-card-title id + clear text
-      const frontH = newCol.querySelector('.flip-card-front-content h3');
+      const frontH = newCol.querySelector('.flip-card-front-content :is(h1,h2,h3,h4,h5,h6)');
       if (frontH) { frontH.id = 'flip-card-title-' + token; frontH.textContent = 'Front Title'; }
-      const backH = newCol.querySelector('.flip-card-header-primary h3');
+      const backH = newCol.querySelector('.flip-card-header-primary :is(h1,h2,h3,h4,h5,h6)');
       if (backH) backH.textContent = 'Back Title';
       const backBody = newCol.querySelector('.flip-card-back-body [contenteditable="true"]');
       if (backBody) backBody.innerHTML = '<p>Content</p>';
