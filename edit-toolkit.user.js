@@ -5,7 +5,7 @@
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      10.1
+// @version      10.2
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -936,9 +936,23 @@
     });
 
     // 8b. Missing lang attribute on the page's <html> element → default to English.
+    // The editor keeps the saved page's <html ...> tag outside the iframe DOM, so
+    // the iframe's own <html> has no lang even when the page has lang="en". Read
+    // the real tag from the editor's content string first; only fall back to the
+    // iframe <html> when the content has no <html> tag (fragment mode).
     {
       const htmlEl = body.ownerDocument && body.ownerDocument.documentElement;
-      if (htmlEl && !htmlEl.getAttribute('lang')) {
+      let rawHtml = '';
+      try { rawHtml = ed.getContent({ format: 'raw' }) || ''; } catch (e) { /* fall back below */ }
+      const htmlTag = /<html\b[^>]*>/i.exec(rawHtml);
+      let hasLang;
+      if (htmlTag) {
+        // \s before "lang" so xml:lang / data-lang don't count; needs a real value
+        hasLang = /\slang\s*=\s*["']?[A-Za-z]/i.test(htmlTag[0]) || !!body.getAttribute('lang');
+      } else {
+        hasLang = !!((htmlEl && htmlEl.getAttribute('lang')) || body.getAttribute('lang'));
+      }
+      if (htmlEl && !hasLang) {
         fixes.push({
           id: fid(), category: 'Structure',
           label: 'No lang attribute on the page → set lang="en"',
