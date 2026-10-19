@@ -5,7 +5,7 @@
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      10.0
+// @version      10.1
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -155,33 +155,54 @@
       return res.json();
     }
 
+    // Module structure fetches run in parallel (capped) but the result is still
+    // assembled in strict pre-order, identical to the old one-at-a-time walk.
     async function buildToc(ou) {
       const ver = 'unstable';
-      const list = [];
-      async function walk(items, depth) {
-        for (const item of items) {
-          if (item.Type === 1) {
-            list.push({ id: item.Id, kind: 'topic', topicType: item.TopicType ?? null, parentModuleId: item.ParentModuleId ?? null });
-          } else if (item.Type === 0) {
-            list.push({ id: item.Id, kind: 'container', depth, parentModuleId: item.ParentModuleId ?? null });
-            const kids = await getJson(`/d2l/api/le/${ver}/${ou}/content/modules/${item.Id}/structure/`);
-            await walk(kids, depth + 1);
-          }
-        }
+      const MAX_PARALLEL = 6;
+      let active = 0;
+      const waiters = [];
+      async function limitedGet(url) {
+        while (active >= MAX_PARALLEL) await new Promise(r => waiters.push(r));
+        active++;
+        try { return await getJson(url); }
+        finally { active--; const w = waiters.shift(); if (w) w(); }
       }
-      const root = await getJson(`/d2l/api/le/${ver}/${ou}/content/root/`);
-      await walk(root, 0);
-      return list;
+      async function walk(items, depth) {
+        const parts = await Promise.all(items.map(async item => {
+          if (item.Type === 1) {
+            return [{ id: item.Id, kind: 'topic', topicType: item.TopicType ?? null, parentModuleId: item.ParentModuleId ?? null }];
+          }
+          if (item.Type === 0) {
+            const kids = await limitedGet(`/d2l/api/le/${ver}/${ou}/content/modules/${item.Id}/structure/`);
+            return [
+              { id: item.Id, kind: 'container', depth, parentModuleId: item.ParentModuleId ?? null },
+              ...(await walk(kids, depth + 1))
+            ];
+          }
+          return [];
+        }));
+        return parts.flat();
+      }
+      const root = await limitedGet(`/d2l/api/le/${ver}/${ou}/content/root/`);
+      return walk(root, 0);
     }
 
+    // One shared in-flight request per course, so a Save & Next click during the
+    // prefetch waits on it instead of starting a second walk.
+    let tocInFlight = null; // { ou, p }
     async function getToc(ou) {
       try {
         const cached = JSON.parse(GM_getValue(TOC_CACHE_KEY, 'null'));
         if (cached && cached.ou === ou && (Date.now() - cached.ts) < TOC_CACHE_TTL_MS) return cached.list;
       } catch {}
-      const list = await buildToc(ou);
-      try { GM_setValue(TOC_CACHE_KEY, JSON.stringify({ ou, ts: Date.now(), list })); } catch {}
-      return list;
+      if (tocInFlight && tocInFlight.ou === ou) return tocInFlight.p;
+      const p = buildToc(ou).then(list => {
+        try { GM_setValue(TOC_CACHE_KEY, JSON.stringify({ ou, ts: Date.now(), list })); } catch {}
+        return list;
+      }).finally(() => { tocInFlight = null; });
+      tocInFlight = { ou, p };
+      return p;
     }
 
     function buildUrl(lessonsId, node) {
@@ -254,6 +275,11 @@
 
       location.href = nextUrl;
     }
+
+    // Prefetch the TOC on every edit page load (no-op while the cache is fresh)
+    // so the first Save & Next click in a course is instant.
+    const ouNow = getOu();
+    if (ouNow) setTimeout(() => getToc(ouNow).catch(e => dbg('TOC prefetch failed', e)), 1000);
 
     return { saveAndNext };
   }
