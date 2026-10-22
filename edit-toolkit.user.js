@@ -5,7 +5,7 @@
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      10.2
+// @version      10.3
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -5020,6 +5020,16 @@
       menu.appendChild(srcBtn);
     }
 
+    // If the click landed in a heading (h1-h6), offer Heading Case conversion.
+    const headingEl = tgt && tgt.closest ? tgt.closest('h1,h2,h3,h4,h5,h6') : null;
+    if (headingEl && rowEl.contains(headingEl)) {
+      const hcBtn = document.createElement('button');
+      hcBtn.textContent = 'Aa Convert heading to Heading Case';
+      hcBtn.title = 'Capitalise all words except small words (a, the, of, and...). Keeps acronyms and inline formatting.';
+      hcBtn.addEventListener('click', () => { convertToHeadingCase(headingEl); closeAnyMenu(); });
+      menu.appendChild(hcBtn);
+    }
+
     const cleanBtn = document.createElement('button');
     cleanBtn.textContent = '🧹 Strip Word/paste formatting';
     cleanBtn.addEventListener('click', () => { stripFormattingIn(rowEl); closeAnyMenu(); });
@@ -5061,6 +5071,52 @@
       const top = imgCol.classList.contains('align-items-start');
       toast(top ? '✓ Columns top-aligned' : '✓ Columns centered', 'success');
     }
+  }
+
+  // Heading Case: capitalise every word except small words (articles, short
+  // conjunctions and prepositions). First and last word, and the first word
+  // after a colon, are always capitalised. Words with an existing capital past
+  // the first letter (BMI, pH, iPhone) are kept. If the whole heading is upper
+  // case it is lowercased first. Edits text nodes only, so inline markup stays.
+  const HEADING_SMALL_WORDS = new Set(['a','an','the','and','but','or','nor','for','so','yet','as','at','by','in','of','off','on','per','to','up','via','vs','vs.','v']);
+  function toHeadingCaseText(headingEl) {
+    const walker = document.createTreeWalker(headingEl, NodeFilter.SHOW_TEXT, {
+      acceptNode: n => (n.parentElement && n.parentElement.closest('.deletion-guard')) || !/[\p{L}\d]/u.test(n.nodeValue)
+        ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT
+    });
+    const nodes = [];
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) nodes.push(n);
+    const wordRe = /[\p{L}\d][\p{L}\d'\u2019]*/gu;
+    const allText = nodes.map(n => n.nodeValue).join(' ');
+    const letters = allText.replace(/[^\p{L}]/gu, '');
+    const allUpper = letters.length > 1 && letters === letters.toUpperCase();
+    const total = (allText.match(wordRe) || []).length;
+    let idx = 0;
+    const changes = [];
+    nodes.forEach(node => {
+      const before = node.nodeValue;
+      const after = before.replace(wordRe, (w, offset) => {
+        const i = idx++;
+        const prev = before.slice(0, offset);
+        const afterColon = /[:?!]\s*$/.test(prev);
+        const edge = i === 0 || i === total - 1 || afterColon;
+        const hasInnerCap = !allUpper && /\p{Lu}/u.test(w.slice(1));
+        if (hasInnerCap) return w;
+        const lower = w.toLowerCase();
+        if (!edge && HEADING_SMALL_WORDS.has(lower)) return lower;
+        return lower.charAt(0).toUpperCase() + lower.slice(1);
+      });
+      if (after !== before) changes.push([node, after]);
+    });
+    return changes;
+  }
+
+  function convertToHeadingCase(headingEl) {
+    const changes = toHeadingCaseText(headingEl);
+    if (!changes.length) { toast('Already in heading case', 'warn'); return; }
+    const didWrite = tinyWrite(() => { changes.forEach(([n, v]) => { n.nodeValue = v; }); }, 'heading case', { ungated: true });
+    if (didWrite) { toast('✓ Converted to heading case', 'success'); scheduleAudit(); }
+    else toast('Editor API unavailable', 'warn');
   }
 
   // Remove Word/paste cruft from an element's editable areas: empty spans,
