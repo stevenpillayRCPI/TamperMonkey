@@ -2,8 +2,8 @@
 // @name         Finder launcher (RCPI Brightspace)
 // @namespace    https://brightspace.rcpi.ie/
 // @version      1.4.0
-// @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/Finder.js
-// @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/Finder.js
+// @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/finder-launcher.user.js
+// @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/finder-launcher.user.js
 // @description  Adds a "Finder" tab on the left edge of every Brightspace page that opens the Finder widget in a popup.
 // @match        https://brightspace.rcpi.ie/*
 // @exclude      https://brightspace.rcpi.ie/shared/Widgets/*
