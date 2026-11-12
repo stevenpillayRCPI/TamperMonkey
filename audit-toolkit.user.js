@@ -3,7 +3,7 @@
 // @namespace    rcpi-content-audit
 // @description  View-mode content audit: WCAG a11y report, broken link/image checker, URL lint, DOI/PMID citation report, copyright/H5P image audit. Read-only — this script never writes to page or editor content; see the Edit Toolkit for fixes.
 // @match        https://brightspace.rcpi.ie/*
-// @version      5.0
+// @version      5.0.1
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/audit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/audit-toolkit.user.js
@@ -46,6 +46,7 @@
     probeAutoRun: false,     // 404 probe fires network requests; opt-in
     citationsAutoRun: true,
     a11yAutoRun: true,
+    originBadges: true,      // image origin badges on figures (author's browser only)
   };
   function loadSettings() {
     try { return Object.assign({}, DEFAULTS, JSON.parse(GM_getValue(SETTINGS_KEY, '{}'))); }
@@ -132,6 +133,7 @@
     return names.some(n => EXCLUDED_PAGE_NAMES.includes(n));
   }
   function removePanel() {
+    try { if (typeof clearOriginBadges === 'function') clearOriginBadges(); } catch (e) {}
     ['rcpi-audit-panel', 'rcpi-audit-minbar'].forEach(id => {
       const el = uiMountDoc.getElementById(id);
       if (el) el.remove();
@@ -405,10 +407,169 @@
     if (FEATURES.citationsAutoRun) run();
   }
 
+  // ─── IMAGE ORIGIN BADGES + SUMMARY ───────────────────────────────────
+  // Badges are injected into the page DOM in the author's browser only (the
+  // script runs via Tampermonkey), so learners never see them. Text is always
+  // shown with the colour. Needs RCPIShared >= 1.0.1 (classifyImageOrigin).
+  const BADGE_ATTR = 'data-rcpi-origin-badge';
+  const SEV_RANK = { skip: 0, ok: 1, info: 2, warn: 3, err: 4 };
+
+  function effectiveOrigin(img) {
+    const o = S.classifyImageOrigin(img);
+    let sev = o.sev;
+    o.flags.forEach(f => { if ((SEV_RANK[f.sev] || 0) > (SEV_RANK[sev] || 0)) sev = f.sev; });
+    return Object.assign({}, o, { sev });
+  }
+
+  function isOwnUiImage(img) {
+    return !!(img.closest && img.closest('#rcpi-audit-panel, #rcpi-audit-minbar'));
+  }
+
+  function injectBadgeCss(doc) {
+    if (doc.getElementById('rcpi-origin-badge-css')) return;
+    const st = doc.createElement('style');
+    st.id = 'rcpi-origin-badge-css';
+    st.textContent = `
+      .rcpi-origin-badge { position: absolute; top: 6px; left: 6px; z-index: 5; font: 700 11px/1.3 system-ui, sans-serif;
+        padding: 2px 8px; border-radius: 10px; color: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.35); cursor: help; }
+      .rcpi-origin-ok { background: #146c43; }
+      .rcpi-origin-info { background: #33607a; }
+      .rcpi-origin-warn { background: #9a5200; }
+      .rcpi-origin-err { background: #b02a37; }
+    `;
+    (doc.head || doc.documentElement).appendChild(st);
+  }
+
+  function clearOriginBadges() {
+    if (typeof S.collectImagesDeep !== 'function') return;
+    S.collectImagesDeep(document).forEach(img => {
+      const holder = img.closest('.image-container') || img.closest('figure') || img.parentElement;
+      if (!holder) return;
+      holder.querySelectorAll(':scope > [' + BADGE_ATTR + ']').forEach(b => b.remove());
+      if (holder.getAttribute('data-rcpi-pos') === '1') { holder.style.position = ''; holder.removeAttribute('data-rcpi-pos'); }
+    });
+  }
+
+  function applyOriginBadges() {
+    if (typeof S.classifyImageOrigin !== 'function') {
+      if (!applyOriginBadges._warned) { applyOriginBadges._warned = true; console.warn('[rcpi-audit] RCPIShared.classifyImageOrigin missing (shared core older than 1.0.1); origin badges disabled'); }
+      return;
+    }
+    if (!FEATURES.originBadges) { clearOriginBadges(); return; }
+    S.collectImagesDeep(document).forEach(img => {
+      if (isOwnUiImage(img)) return;
+      const holder = img.closest('.image-container') || img.closest('figure') || img.parentElement;
+      if (!holder) return;
+      const doc = img.ownerDocument;
+      const old = holder.querySelector(':scope > [' + BADGE_ATTR + ']');
+      const o = effectiveOrigin(img);
+      if (o.sev === 'skip') { if (old) old.remove(); return; }
+      injectBadgeCss(doc);
+      const b = old || doc.createElement('span');
+      b.setAttribute(BADGE_ATTR, '1');
+      b.className = 'rcpi-origin-badge rcpi-origin-' + o.sev;
+      b.textContent = o.label + (o.flags.length ? ' ⚠' : '');
+      b.title = [o.text ? 'Caption: ' + o.text : 'No source text found'].concat(o.flags.map(f => f.msg)).join('\n');
+      if (!old) {
+        try {
+          if (doc.defaultView.getComputedStyle(holder).position === 'static') { holder.style.position = 'relative'; holder.setAttribute('data-rcpi-pos', '1'); }
+        } catch (e) {}
+        holder.appendChild(b);
+      }
+    });
+  }
+
+  let badgeTimer = null;
+  function startBadgeTimer() {
+    if (badgeTimer) return;
+    // Content frames and lazy images load after mount; re-apply is idempotent.
+    badgeTimer = setInterval(() => { try { applyOriginBadges(); } catch (e) {} }, 4000);
+  }
+
+  function collectOriginRows() {
+    if (typeof S.classifyImageOrigin !== 'function') return [];
+    return S.collectImagesDeep(document).filter(img => !isOwnUiImage(img)).map(img => {
+      const o = effectiveOrigin(img);
+      const src = img.getAttribute('src') || '';
+      return { img, o, name: (src.split('/').pop() || src).split('?')[0] };
+    }).filter(r => r.o.sev !== 'skip');
+  }
+
+  function renderOriginSummary(host) {
+    if (typeof S.classifyImageOrigin !== 'function') {
+      host.innerHTML = '<p class="rcpi-empty">Image origin summary needs the shared core 1.0.1 or later. Tampermonkey may still have a cached copy; reload after the core updates.</p>';
+      return;
+    }
+    const rows = collectOriginRows();
+    const kinds = [['rcpi', 'RCPI-made', 'ok'], ['stock', 'Stock', 'info'], ['thirdparty', 'Third party', 'warn'], ['creator', 'Creator named', 'warn'],
+      ['unrecognised', 'Unrecognised', 'warn'], ['placeholder', 'Placeholder', 'err'], ['missing', 'No source line', 'err'], ['nofigure', 'No figure', 'err']];
+    const counts = {};
+    rows.forEach(r => { counts[r.o.kind] = (counts[r.o.kind] || 0) + 1; });
+    const attention = rows.filter(r => r.o.sev === 'err' || r.o.sev === 'warn' || r.o.flags.length);
+    host.innerHTML = `
+      <div class="rcpi-sec-title">Image origins on this page (${rows.length} content image${rows.length === 1 ? '' : 's'})</div>
+      <div class="rcpi-sum-row" data-counts></div>
+      <div class="rcpi-tab-toolbar">
+        <select class="rcpi-textarea" style="width:auto;font:12px sans-serif" data-filter>
+          <option value="attention">Needs attention (${attention.length})</option>
+          <option value="all">All (${rows.length})</option>
+          <option value="rcpi">RCPI-made</option>
+          <option value="other">Third party and stock</option>
+        </select>
+        <label class="rcpi-set-row" style="margin:0"><input type="checkbox" data-badges> Badges on page</label>
+      </div>
+      <div class="rcpi-list" data-origin-list></div>`;
+    const cEl = host.querySelector('[data-counts]');
+    kinds.forEach(([k, label, sev]) => {
+      if (!counts[k]) return;
+      const sp = uiMountDoc.createElement('span');
+      sp.className = 'rcpi-badge ' + (sev === 'warn' ? 'warn' : sev);
+      sp.textContent = label + ' ' + counts[k];
+      cEl.appendChild(sp);
+    });
+    if (!rows.length) cEl.innerHTML = '<span class="rcpi-muted">No content images found.</span>';
+    const sel = host.querySelector('[data-filter]');
+    const list = host.querySelector('[data-origin-list]');
+    const cb = host.querySelector('[data-badges]');
+    cb.checked = !!FEATURES.originBadges;
+    cb.addEventListener('change', () => { FEATURES.originBadges = cb.checked; saveSettings(FEATURES); applyOriginBadges(); });
+    function drawList() {
+      const f = sel.value;
+      const shown = rows.filter(r => f === 'all' ? true
+        : f === 'rcpi' ? r.o.kind === 'rcpi'
+        : f === 'other' ? (r.o.kind === 'thirdparty' || r.o.kind === 'stock' || r.o.kind === 'creator')
+        : (r.o.sev === 'err' || r.o.sev === 'warn' || r.o.flags.length));
+      list.innerHTML = '';
+      if (!shown.length) { list.innerHTML = '<div class="rcpi-empty">Nothing to show.</div>'; return; }
+      shown.forEach(r => {
+        const row = uiMountDoc.createElement('div');
+        row.className = 'rcpi-row rcpi-sev-' + (r.o.sev === 'warn' ? 'warn' : r.o.sev === 'err' ? 'err' : 'info');
+        const main = uiMountDoc.createElement('div');
+        main.className = 'rcpi-row-main';
+        const cat = uiMountDoc.createElement('span'); cat.className = 'rcpi-cat'; cat.textContent = r.o.label;
+        const msg = uiMountDoc.createElement('span'); msg.className = 'rcpi-msg';
+        msg.textContent = r.name + (r.o.text ? ' | ' + r.o.text.slice(0, 90) : '');
+        main.appendChild(cat); main.appendChild(msg);
+        r.o.flags.forEach(fl => {
+          const d = uiMountDoc.createElement('div'); d.className = 'rcpi-muted'; d.textContent = '⚠ ' + fl.msg; main.appendChild(d);
+        });
+        const btn = uiMountDoc.createElement('button');
+        btn.className = 'rcpi-locate-btn'; btn.textContent = 'Locate';
+        btn.addEventListener('click', () => S.locateInPage(r.img.closest('figure') || r.img));
+        row.appendChild(main); row.appendChild(btn);
+        list.appendChild(row);
+      });
+    }
+    sel.addEventListener('change', drawList);
+    drawList();
+  }
+
   // ─── COPYRIGHT & H5P TAB ─────────────────────────────────────────────
   function renderCopyrightTab(bodyEl) {
     const session = S.loadAuditSession();
     bodyEl.innerHTML = `
+      <div data-origin-summary></div>
+      <div class="rcpi-sec-title">Recording and CSV export</div>
       <p class="rcpi-muted" style="margin:0 0 8px">
         ${session.active
           ? `Recording. ${session.rows.length} image(s) captured so far. Navigate through the pages you want audited — this page's images are captured automatically. Then Stop &amp; Export.`
@@ -418,6 +579,7 @@
       </p>
       <div class="rcpi-tab-toolbar" data-actions></div>`;
     const actions = bodyEl.querySelector('[data-actions]');
+    try { renderOriginSummary(bodyEl.querySelector('[data-origin-summary]')); } catch (e) { console.error('[rcpi-audit] origin summary failed', e); }
 
     function draw() {
       const s = S.loadAuditSession();
@@ -430,8 +592,8 @@
           const cur = S.loadAuditSession();
           cur.active = false;
           S.saveAuditSession(cur);
-          const rows = [['Date', 'Where used', 'Image', 'Source URL', 'Basis', 'Attribution line used', 'Changed?', 'Page URL', 'Brightspace URL']];
-          cur.rows.forEach(r => rows.push([r.date, r.whereUsed, r.image, r.sourceUrl, r.basis, r.attribution, r.changed, r.pageUrl, r.brightspaceUrl || '']));
+          const rows = [['Date', 'Where used', 'Image', 'Source URL', 'Basis', 'Attribution line used', 'Changed?', 'Flags', 'Page URL', 'Brightspace URL']];
+          cur.rows.forEach(r => rows.push([r.date, r.whereUsed, r.image, r.sourceUrl, r.basis, r.attribution, r.changed, r.flags || '', r.pageUrl, r.brightspaceUrl || '']));
           S.downloadCsv(rows, 'copyright-audit', uiMountDoc);
           renderCopyrightTab(bodyEl);
         });
@@ -493,6 +655,7 @@
       <label class="rcpi-set-row"><input type="checkbox" data-k="probeAutoRun"> Auto-run link/image check on page load (makes network requests)</label>
       <label class="rcpi-set-row"><input type="checkbox" data-k="citationsAutoRun"> Auto-run citation check on page load</label>
       <label class="rcpi-set-row"><input type="checkbox" data-k="a11yAutoRun"> Auto-run accessibility scan on page load</label>
+      <label class="rcpi-set-row"><input type="checkbox" data-k="originBadges"> Show image origin badges on figures (this browser only, learners never see them)</label>
       <div class="rcpi-sec-title" style="margin-top:14px">Ignore domains for link check</div>
       <textarea class="rcpi-textarea" data-ignore rows="6"></textarea>
       <button class="rcpi-btn sec" data-save-ignore style="margin-top:6px">Save ignore list</button>
@@ -500,7 +663,7 @@
     Object.keys(DEFAULTS).forEach(k => {
       const cb = bodyEl.querySelector(`[data-k="${k}"]`);
       cb.checked = !!FEATURES[k];
-      cb.addEventListener('change', () => { FEATURES[k] = cb.checked; saveSettings(FEATURES); });
+      cb.addEventListener('change', () => { FEATURES[k] = cb.checked; saveSettings(FEATURES); if (k === 'originBadges') applyOriginBadges(); });
     });
     const ta = bodyEl.querySelector('[data-ignore]');
     ta.value = S.loadIgnoreDomains().join('\n');
@@ -623,6 +786,8 @@
     setTimeout(() => {
       try {
         if (FEATURES.a11yAutoRun) runA11yScan();
+        applyOriginBadges();
+        startBadgeTimer();
         appendThisPage(); // no-op if recording session isn't active
         updateFabBadge();
       } catch (e) {}

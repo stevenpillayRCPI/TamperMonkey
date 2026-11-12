@@ -5,7 +5,7 @@
 // @match        https://brightspace.rcpi.ie/d2l/le/lessons/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lms/content/*/edit/*
 // @match        https://brightspace.rcpi.ie/d2l/lp/manageFiles/*
-// @version      10.3
+// @version      10.3.1
 // @require      https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/rcpi-shared-core.js
 // @updateURL    https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/stevenpillayRCPI/TamperMonkey/refs/heads/main/edit-toolkit.user.js
@@ -6930,6 +6930,18 @@ function addParagraphToRow(rowEl) {
       if (!st.hasCaption) add('Add caption', () => imageAddCaption(imgEl));
     }
 
+    // Copyright: mark / clear an RCPI-made image (writes "Image: RCPI" into the
+    // licence line). Only for content images in a figure. Use only where RCPI
+    // owns the image (staff-made, or assignment clause in place).
+    if (st.figure && !st.isDecorative) {
+      const sepC = document.createElement('div');
+      sepC.className = 'bb-ctx-sub';
+      sepC.textContent = 'Copyright';
+      menu.appendChild(sepC);
+      if (isRcpiMarked(st.figure)) add('Clear RCPI-made mark', () => imageSetRcpiMade(imgEl, false));
+      else add('Mark as RCPI-made (Image: RCPI)', () => imageSetRcpiMade(imgEl, true));
+    }
+
     // Reverse image search (Google Lens by image URL) — only useful if the
     // image has a real, public http(s) src (not a data: URI or placeholder).
     const src = imgEl.getAttribute('src') || '';
@@ -7185,6 +7197,60 @@ function addParagraphToRow(rowEl) {
       figure.appendChild(cap);
     }, 'image add caption', { ungated: true });
     finishImage(didWrite, 'Caption added');
+  }
+
+  // RCPI-made marker. The licence line text "Image: RCPI" is what learners and
+  // the Audit Toolkit read; data-origin="rcpi" on the figure is a backup flag
+  // (TinyMCE may strip it, which is harmless).
+  function isRcpiMarked(figure) {
+    if (!figure) return false;
+    const cap = figure.querySelector('figcaption');
+    const lic = cap && cap.querySelector('.image-license');
+    const t = ((lic ? lic.textContent : (cap ? cap.textContent : '')) || '').replace(/\s+/g, ' ').trim();
+    return /\bimage:\s*rcpi\b/i.test(t);
+  }
+
+  function imageSetRcpiMade(imgEl, mark) {
+    if (mark) {
+      // Guard: do not silently overwrite a real attribution line.
+      const fig0 = imgEl.closest('figure');
+      const lic0 = fig0 && fig0.querySelector('figcaption .image-license');
+      const cur = ((lic0 && lic0.textContent) || '').replace(/\s+/g, ' ').trim();
+      if (cur && !/^licen[cs]e\s*\/\s*attribution$/i.test(cur) && !isRcpiMarked(fig0)
+          && !window.confirm('Replace the existing licence line:\n\n"' + cur.slice(0, 120) + '"\n\nwith "Image: RCPI"? Only do this if RCPI owns the image (staff-made, or an assignment clause is in place).')) return;
+    }
+    const didWrite = tinyWrite(() => {
+      const figure = imgEl.closest('figure');
+      if (!figure) return;
+      let cap = figure.querySelector('figcaption');
+      if (!cap) {
+        cap = tinyDoc.createElement('figcaption');
+        cap.setAttribute('contenteditable', 'false');
+        cap.innerHTML = captionHTML('Caption ');
+        figure.appendChild(cap);
+      }
+      let lic = cap.querySelector('.image-license');
+      if (!lic) {
+        // Column-layout figures have a caption but no licence line: add one.
+        let host = cap.querySelector('span[contenteditable="true"]');
+        if (!host) {
+          host = tinyDoc.createElement('span');
+          host.setAttribute('contenteditable', 'true');
+          cap.appendChild(host);
+        }
+        lic = tinyDoc.createElement('span');
+        lic.className = 'image-license';
+        host.appendChild(lic);
+      }
+      if (mark) {
+        lic.textContent = 'Image: RCPI';
+        figure.setAttribute('data-origin', 'rcpi');
+      } else {
+        lic.textContent = 'License / attribution ';
+        figure.removeAttribute('data-origin');
+      }
+    }, 'image rcpi-made=' + mark, { ungated: true });
+    finishImage(didWrite, mark ? 'Marked as RCPI-made' : 'RCPI-made mark cleared');
   }
 
   function finishImage(didWrite, okMsg) {

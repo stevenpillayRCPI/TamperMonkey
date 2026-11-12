@@ -1,6 +1,6 @@
 /* =====================================================================
  * RCPI Toolkit — Shared Core
- * Version: 1.0
+ * Version: 1.0.1
  * ---------------------------------------------------------------------
  * Canonical detection rules + generic helpers used by BOTH the Block
  * Builder Edit Toolkit (edit mode) and the Brightspace Audit Toolkit
@@ -1094,8 +1094,79 @@
       const filename = (src.split('/').pop() || src).split('?')[0];
       const fig = img.closest('figure') || img.closest('.figure-wrapper');
       const capEl = fig && fig.querySelector('figcaption');
-      out.push({ date: dateStr, whereUsed, image: filename, sourceUrl: '', basis: '', attribution: capEl ? capEl.textContent.trim() : '', changed: '', pageUrl, brightspaceUrl });
+      const o = classifyImageOrigin(img);
+      out.push({ date: dateStr, whereUsed, image: filename, sourceUrl: '', basis: o.label, attribution: capEl ? capEl.textContent.trim() : '', changed: o.changed, flags: o.flags.map(f => f.msg).join(' | '), pageUrl, brightspaceUrl });
     });
+    return out;
+  }
+
+  // ─── IMAGE ORIGIN (caption based, read-only) ──────────────────────────
+  // Classifies a figure by the lead-in of its licence line (.image-license,
+  // falling back to the whole figcaption). The lead-in verbs follow the
+  // copyright checklist: "Image: RCPI" marks RCPI-made work; the other verbs
+  // say whether a third-party image was reproduced, cropped or adapted.
+  //   kind: skip | rcpi | stock | thirdparty | creator | unrecognised | placeholder | missing | nofigure
+  //   sev : skip | ok | info | warn | err
+  const ORIGIN_RE = {
+    rcpi: /\bimage:\s*rcpi\b|commissioned\s+by\s+rcpi\b/i,
+    stock: /\blicen[cs]ed\s+via\b/i,
+    third: /\b(reproduced|cropped|adapted)\s+from\b|\bdetail\s+from\b|\bpanel\s+[a-z0-9]+\s+from\b|\bdata\s+from\b|\breproduced\s+with\s+permission\b|\bcopied\s+under\s+icla\b|\bcreative\s+commons\b|\bcc[\s-]?(by|0)\b|\bpublic\s+domain\b|\bopen\s+government\s+licen[cs]e\b|\bcreated\s+with\s+biorender\b|\blicen[cs]ed\s+under\b|©/i,
+    creator: /\b(image|photo)\s*:/i,
+    placeholder: /^\s*(licen[cs]e\s*\/\s*attribution)?\s*$/i,
+    retired: /\bimage\s+source\s*:/i,
+    courtesy: /\bcourtesy\s+of\b/i,
+    alters: /\b(adapted\s+from|cropped\s+from|detail\s+from|panel\s+[a-z0-9]+\s+from)\b/i,
+    nd: /\bcc[\s-]?by[\s-]?(nc[\s-]?)?nd\b|\bno\s+derivatives?\b/i,
+    cc: /\bcc[\s-]?(by|0)\b|\bcreative\s+commons\b/i,
+    ccVersion: /\b[1-4]\.\d\b/,
+  };
+
+  function _norm(t) { return String(t || '').replace(/\s+/g, ' ').trim(); }
+
+  function classifyImageOrigin(img) {
+    const out = { kind: 'missing', label: 'No source line', sev: 'err', text: '', changed: '', flags: [] };
+    if (!img) return out;
+    const fig = img.closest('figure') || img.closest('.figure-wrapper');
+    const decorative = img.classList.contains('decorative')
+      || !!(fig && fig.classList && fig.classList.contains('decorative'))
+      || img.getAttribute('alt') === '';
+    if (decorative) { out.kind = 'skip'; out.label = 'Decorative'; out.sev = 'skip'; return out; }
+    if (!fig) { out.kind = 'nofigure'; out.label = 'No figure or caption'; out.sev = 'err'; return out; }
+
+    const cap = fig.querySelector('figcaption');
+    const lic = cap && cap.querySelector('.image-license');
+    const licText = _norm(lic && lic.textContent);
+    const capText = _norm(cap && cap.textContent);
+    const hasLicSpan = !!lic;
+    const text = (hasLicSpan && !ORIGIN_RE.placeholder.test(licText)) ? licText : capText;
+    out.text = text;
+
+    if (hasLicSpan && ORIGIN_RE.placeholder.test(licText)) {
+      out.kind = 'placeholder'; out.label = 'Placeholder'; out.sev = 'err';
+    } else if (ORIGIN_RE.rcpi.test(text)) {
+      out.kind = 'rcpi'; out.label = 'RCPI-made'; out.sev = 'ok';
+    } else if (ORIGIN_RE.stock.test(text)) {
+      out.kind = 'stock'; out.label = 'Stock'; out.sev = 'info';
+    } else if (ORIGIN_RE.third.test(text)) {
+      out.kind = 'thirdparty'; out.label = 'Third party'; out.sev = 'warn';
+    } else if (ORIGIN_RE.creator.test(text)) {
+      out.kind = 'creator'; out.label = 'Creator named'; out.sev = 'warn';
+    } else if (hasLicSpan) {
+      out.kind = 'unrecognised'; out.label = 'Unrecognised'; out.sev = 'warn';
+    } else {
+      out.kind = 'missing'; out.label = 'No source line'; out.sev = 'err';
+    }
+
+    if (/\breproduced\s+from\b/i.test(text)) out.changed = 'No';
+    else if (/\b(cropped\s+from|detail\s+from|panel\s+[a-z0-9]+\s+from)\b/i.test(text)) out.changed = 'Cropped';
+    else if (/\badapted\s+from\b/i.test(text)) out.changed = 'Yes';
+
+    // Wording lint (applies whenever there is caption text to read).
+    if (ORIGIN_RE.retired.test(text)) out.flags.push({ sev: 'warn', msg: '"Image source:" is retired. Use "Reproduced from:" or the verb that matches what changed.' });
+    if (ORIGIN_RE.courtesy.test(text)) out.flags.push({ sev: 'warn', msg: '"Courtesy of" implies permission was granted. Use it only if it was; otherwise use "Reproduced from:".' });
+    if (ORIGIN_RE.alters.test(text) && ORIGIN_RE.nd.test(text)) out.flags.push({ sev: 'err', msg: 'Altered image under an ND licence ("Adapted from", "Cropped from", "Detail from" or "Panel from"). ND allows the whole image, unchanged, only.' });
+    if (ORIGIN_RE.cc.test(text) && !ORIGIN_RE.ccVersion.test(text)) out.flags.push({ sev: 'info', msg: 'CC licence without a version number. State the version shown on the item.' });
+    if (fig.getAttribute('data-origin') === 'rcpi' && out.kind !== 'rcpi') out.flags.push({ sev: 'warn', msg: 'Figure is marked data-origin="rcpi" but the caption does not say "Image: RCPI".' });
     return out;
   }
 
@@ -1323,7 +1394,7 @@
 
   // ─── EXPORT ───────────────────────────────────────────────────────────
   const API = {
-    version: '1.0.0',
+    version: '1.0.1',
     config: CFG,
 
     // generic
@@ -1352,6 +1423,7 @@
 
     // copyright / h5p
     collectImagesDeep, findImagePathsInH5PJson, scanH5PIframeForCopyright, scanImagesForCopyright,
+    classifyImageOrigin,
 
     // ui
     createDockedShell,
